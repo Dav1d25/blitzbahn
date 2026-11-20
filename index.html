@@ -39,6 +39,16 @@
   .feld b { font-size: 26px; font-weight: 700; }
   #pause { pointer-events: auto; }
 
+  /* Messanzeige (Testgelände) */
+  #mess {
+    position: fixed; left: var(--rand-l); top: calc(var(--rand-o) + var(--gross) * 0.72 + 12px);
+    background: rgba(15, 30, 60, 0.7); color: #fff; border-radius: 10px; padding: 8px 12px;
+    font-size: 13px; line-height: 1.55; font-variant-numeric: tabular-nums; pointer-events: none;
+    min-width: 190px;
+  }
+  #mess b { color: #ffc35a; font-weight: 600; }
+  #mess .titel { font-size: 11px; opacity: 0.7; letter-spacing: 0.08em; }
+
   /* Touch-Knöpfe */
   .knopf {
     position: fixed; width: var(--gross); height: var(--gross);
@@ -63,17 +73,26 @@
   }
   #pausiert {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; z-index: 5; cursor: pointer;
     background: rgba(10, 20, 40, 0.5); color: #fff; font-size: 48px; font-weight: 800;
+  }
+  #pausiert small { font-size: 20px; font-weight: 400; }
+  #laden {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #13264a; color: #fff; font-size: 28px; font-weight: 700; z-index: 8;
   }
   #quer {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
     background: #13264a; color: #fff; font-size: 24px; text-align: center; padding: 30px; z-index: 10;
   }
   @media (orientation: portrait) and (pointer: coarse) { #quer { display: flex; } }
-  #fehler { position: fixed; left: 10px; bottom: 10px; color: #b00; background: #fff; padding: 6px; display: none; }
+  #fehler { position: fixed; left: 10px; bottom: 10px; color: #b00; background: #fff; padding: 6px; display: none; z-index: 11; }
 </style>
 <script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "rapier": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier.es.js"
+} }
 </script>
 </head>
 <body>
@@ -84,6 +103,14 @@
   <div class="feld"><small>KM/H</small><b id="tempo">0</b></div>
 </div>
 
+<div id="mess">
+  <div class="titel">MESSWERTE</div>
+  0 → 100 km/h: <b id="m100">–</b><br>
+  Bremsweg: <b id="mbrems">–</b><br>
+  Drehrate: <b id="mdreh">–</b><br>
+  Letzter Flug: <b id="mflug">–</b>
+</div>
+
 <div id="kamera" class="knopf klein" title="Kamera (C)">🎥</div>
 <div id="reset"  class="knopf klein" title="Zurück zum Start (R)">↺</div>
 <div id="gas"    class="knopf" data-halten="gas">▲</div>
@@ -91,32 +118,58 @@
 <div id="links"  class="knopf" data-halten="links">◀</div>
 <div id="rechts" class="knopf" data-halten="rechts">▶</div>
 
-<div id="hinweis">▲ halten = Gas &nbsp;·&nbsp; ▼ = Bremse/Rückwärts &nbsp;·&nbsp; ◀ ▶ = Lenken<br><small>Am PC: W A S D oder Pfeiltasten, R = Reset</small></div>
-<div id="pausiert">Pause</div>
+<div id="hinweis">▲ halten = Gas &nbsp;·&nbsp; ▼ = Bremse/Rückwärts &nbsp;·&nbsp; ◀ ▶ = Lenken<br>
+  <small>Testgelände: rechts Schanzen, links Hügel und Wandgasse · in der Luft ▼ = Luftbremse<br>Am PC: W A S D oder Pfeiltasten, R = Reset</small></div>
+<div id="pausiert">Pause<small>Irgendwo tippen zum Weiterfahren</small></div>
+<div id="laden">Lädt …</div>
 <div id="quer">Bitte das iPad quer halten 🔄</div>
 <div id="fehler"></div>
 
 <script type="module">
 import * as THREE from 'three';
+import RAPIER from 'rapier';
 
 // =====================================================================
 //  FAHRWERTE – alle Zahlen aus der Spezifikation (Abschnitt 3.3 / 3.5)
-//  Tempo immer in km/h, Zeit in Sekunden.
+//  Tempo in km/h, Zeit in Sekunden, Längen in Metern.
 // =====================================================================
 const P = {
-  ANTRIEB: 71.8,        // +km/h pro Sekunde bei Vollgas
-  WIDERSTAND: 0.1045,   // −0,1045 × Tempo pro Sekunde
-  BREMSE: 250,          // −km/h pro Sekunde
-  RUECK_ANTRIEB: 34,    // Rückwärts: Beschleunigung am Anfang
-  RUECK_MAX: 38.5,      // Rückwärts: Höchsttempo
-  LENK_MAX: 0.41,       // größter Radeinschlag (rad) bis LENK_KNICK km/h
+  // Antrieb und Bremse (gemessen)
+  ANTRIEB: 71.8,          // +km/h pro Sekunde bei Vollgas
+  WIDERSTAND: 0.1045,     // −0,1045 × Tempo pro Sekunde
+  BREMSE: 250,            // −km/h pro Sekunde
+  RUECK_ANTRIEB: 34,      // Rückwärts: Beschleunigung am Anfang
+  RUECK_MAX: 38.5,        // Rückwärts: Höchsttempo
+  // Lenkung (gemessen)
+  LENK_MAX: 0.41,         // größter Radeinschlag (rad) bis LENK_KNICK km/h
   LENK_KNICK: 45,
-  LENK_EXP: 1.4,        // Einschlag = 0,41 × (45 / Tempo)^1,4
-  LENK_RATE: 4,         // rad pro Sekunde Ein-/Auslenken
-  RADSTAND: 3.0,        // m, ergibt ca. 25 m Kurvenradius bei 100 km/h
-  SCHRITT: 1 / 240,     // Physik-Schritt (240 pro Sekunde)
-  WELT_RAND: 1900,      // m vom Start: dort ist die Welt zu Ende
+  LENK_EXP: 1.4,          // Einschlag = 0,41 × (45 / Tempo)^1,4
+  LENK_RATE: 4,           // rad pro Sekunde Ein-/Auslenken
+  RADSTAND: 2.6,          // ergibt ca. 25 m Kurvenradius bei 100 km/h
+  DREH_MAX: 66,           // °/s – schneller dreht das Auto nie (gemessen: 60–70 °/s bei 30–150 km/h)
+  GRIP: 15,               // wie schnell seitliches Rutschen abgebaut wird (höher = weniger Drift)
+  // Federung
+  MASSE: 1000,            // kg
+  FEDER_RUHE: 0.079,      // m Einfederung im Stand (gemessen)
+  FEDER_LAENGE: 0.5,      // m vom Aufhängepunkt bis Radmitte (voll ausgefedert)
+  RAD_RADIUS: 0.42,
+  DAEMPFUNG: 0.5,         // Anteil der "kritischen" Dämpfung (0 = schwingt ewig, 1 = kein Nachschwingen)
+  SCHWERKRAFT: 9.81,
+  // Luft und Wände (gemessen)
+  LUFT_DREHVERLUST: 0.1,  // −1 % Drehung pro 100 ms in der Luft
+  LUFTBREMSE: 2.6,       // rad/s² – Luftbremse (▼ in der Luft) bremst das Drehen
+  WAND_STREIF: 0.42,      // streifender Wandtreffer: Tempo × 0,42 (110 → 46 km/h)
+  WAND_RUECKPRALL: 0.11,  // frontaler Treffer: 251 → −27 km/h
+  // Technik
+  SCHRITT: 1 / 240,       // Physik-Schritt (240 pro Sekunde)
+  WELT_RAND: 1900,        // m vom Start: dort ist die Welt zu Ende
 };
+const FEDER_K = P.MASSE * P.SCHWERKRAFT / (4 * P.FEDER_RUHE);              // Federhärte je Rad
+const FEDER_C = P.DAEMPFUNG * 2 * Math.sqrt(FEDER_K * P.MASSE / 4);         // Dämpfer je Rad
+const START = { x: 0, y: P.FEDER_LAENGE + P.RAD_RADIUS - P.FEDER_RUHE + 0.01, z: 0 };
+
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+await RAPIER.init();
 
 // ---------- Grundgerüst: Bildfläche, Szene, Licht ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -130,17 +183,21 @@ const scene = new THREE.Scene();
 const himmel = new THREE.Color(0x87b9e8);
 scene.background = himmel;
 scene.fog = new THREE.Fog(himmel, 250, 1400);
-
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 3000);
 
 scene.add(new THREE.HemisphereLight(0xdff0ff, 0x4a6b3a, 1.4));
 const sonne = new THREE.DirectionalLight(0xffffff, 2.2);
 sonne.castShadow = true;
 sonne.shadow.mapSize.set(1024, 1024);
-Object.assign(sonne.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 120 });
+Object.assign(sonne.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 150 });
 scene.add(sonne, sonne.target);
 
-// ---------- Boden: große Ebene mit Karomuster (damit man Tempo sieht) ----------
+// ---------- Physik-Welt ----------
+const welt = new RAPIER.World({ x: 0, y: -P.SCHWERKRAFT, z: 0 });
+welt.timestep = P.SCHRITT;
+const wandCollider = [];   // für die Wand-Regeln (Streifen / Rückprall)
+
+// ---------- Boden ----------
 function bodenTextur() {
   const c = document.createElement('canvas'); c.width = c.height = 128;
   const g = c.getContext('2d');
@@ -155,17 +212,77 @@ function bodenTextur() {
 }
 const BODEN = 4000;
 const tex = bodenTextur(); tex.repeat.set(BODEN / 20, BODEN / 20); // ein Karo = 10 m
-const boden = new THREE.Mesh(new THREE.PlaneGeometry(BODEN, BODEN),
-  new THREE.MeshLambertMaterial({ map: tex }));
+const boden = new THREE.Mesh(new THREE.PlaneGeometry(BODEN, BODEN), new THREE.MeshLambertMaterial({ map: tex }));
 boden.rotation.x = -Math.PI / 2; boden.receiveShadow = true;
 scene.add(boden);
+const bodenKoerper = welt.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -1, 0));
+welt.createCollider(RAPIER.ColliderDesc.cuboid(BODEN / 2, 1, BODEN / 2).setFriction(0.5), bodenKoerper);
 
-// Startlinie
 const linie = new THREE.Mesh(new THREE.PlaneGeometry(12, 1.5), new THREE.MeshBasicMaterial({ color: 0xffffff }));
 linie.rotation.x = -Math.PI / 2; linie.position.set(0, 0.02, 3);
 scene.add(linie);
 
-// Bäume und Pfosten als Orientierung (immer gleich verteilt)
+// ---------- Bausteine fürs Testgelände ----------
+const fest = welt.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+const matRampe = new THREE.MeshLambertMaterial({ color: 0x9aa3ad, flatShading: true, side: THREE.DoubleSide });
+const matWand = new THREE.MeshLambertMaterial({ color: 0xe8e2d6, flatShading: true });
+const matRot = new THREE.MeshLambertMaterial({ color: 0xd8432e, flatShading: true });
+
+// Keil = Rampe: steigt in Blickrichtung von 0 auf "hoehe" an
+function keil(x, z, richtung, breite, laenge, hoehe) {
+  const w = breite / 2;
+  const pkt = [[-w,0,0],[w,0,0],[-w,0,laenge],[w,0,laenge],[-w,hoehe,laenge],[w,hoehe,laenge]];
+  const flaechen = [[0,1,5],[0,5,4],[2,3,5],[2,5,4],[0,2,4],[1,3,5],[0,1,3],[0,3,2]];
+  const pos = [];
+  for (const f of flaechen) for (const i of f) pos.push(...pkt[i]);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, matRampe);
+  mesh.position.set(x, 0, z); mesh.rotation.y = richtung;
+  mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, richtung, 0));
+  welt.createCollider(RAPIER.ColliderDesc.convexHull(new Float32Array(pkt.flat()))
+    .setTranslation(x, 0, z).setRotation(q).setFriction(0.5), fest);
+}
+// Quader (Plateau oder Wand)
+function quader(x, y, z, bx, by, bz, mat, istWand) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(bx, by, bz), mat);
+  mesh.position.set(x, y, z); mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+  const c = welt.createCollider(RAPIER.ColliderDesc.cuboid(bx / 2, by / 2, bz / 2)
+    .setTranslation(x, y, z).setFriction(istWand ? 0.1 : 0.5), fest);
+  if (istWand) { c.wandNormale = bx < bz ? V(1, 0, 0) : V(0, 0, 1); wandCollider.push(c); }
+}
+// Schild mit Text
+function schild(text, x, z) {
+  const c = document.createElement('canvas'); c.width = 512; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#13264a'; g.fillRect(0, 0, 512, 128);
+  g.fillStyle = '#ffc35a'; g.font = 'bold 64px system-ui, sans-serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, 68);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t }));
+  s.scale.set(12, 3, 1); s.position.set(x, 7, z); scene.add(s);
+}
+
+// Schanzen (rechts vom Start)
+keil(40, 80, 0, 10, 12, 2);                       // kleine Rampe
+schild('Kleine Rampe', 40, 70);
+keil(85, 80, 0, 12, 30, 7);                       // große Schanze …
+keil(85, 190, Math.PI, 12, 40, 7);                // … mit Landehang (40 m Lücke)
+schild('Schanze (ab ca. 120 km/h)', 85, 70);
+// Hügel (links)
+keil(-80, 60, 0, 14, 25, 4);
+quader(-80, 2, 90, 14, 4, 10, matRampe, false);
+keil(-80, 120, Math.PI, 14, 25, 4);
+schild('Hügel', -80, 50);
+// Wandgasse (weiter links): lange Seitenwände, am Ende eine Prallwand
+quader(-120, 0.75, 230, 1, 1.5, 420, matWand, true);
+quader(-150, 0.75, 230, 1, 1.5, 420, matWand, true);
+quader(-135, 0.75, 440, 31, 1.5, 1, matRot, true);
+schild('Wandgasse', -135, 10);
+
+// Bäume, Pfosten, Berge (nur Kulisse)
 let saat = 7;
 const zufall = () => (saat = (saat * 16807) % 2147483647) / 2147483647;
 const stamm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.4, 0.5, 3, 5),
@@ -175,14 +292,14 @@ const krone = new THREE.InstancedMesh(new THREE.ConeGeometry(2.6, 7, 6),
 const m = new THREE.Matrix4();
 for (let i = 0; i < 400; i++) {
   let x, z;
-  do { x = (zufall() - 0.5) * 3600; z = (zufall() - 0.5) * 3600; } while (Math.hypot(x, z) < 40);
+  do { x = (zufall() - 0.5) * 3600; z = (zufall() - 0.5) * 3600; }
+  while (Math.hypot(x, z) < 40 || (x > -180 && x < 130 && z > -30 && z < 700));
   const s = 0.7 + zufall() * 0.8;
   m.makeScale(s, s, s).setPosition(x, 1.5 * s, z); stamm.setMatrixAt(i, m);
   m.makeScale(s, s, s).setPosition(x, 6 * s, z); krone.setMatrixAt(i, m);
 }
 stamm.castShadow = krone.castShadow = true;
 scene.add(stamm, krone);
-// Pfosten-Allee geradeaus (alle 50 m), gut zum Tempo-Gefühl
 const pfosten = new THREE.InstancedMesh(new THREE.BoxGeometry(0.6, 2.5, 0.6),
   new THREE.MeshLambertMaterial({ color: 0xff7a1a }), 160);
 for (let i = 0; i < 80; i++) {
@@ -190,8 +307,6 @@ for (let i = 0; i < 80; i++) {
   m.makeTranslation(8, 1.25, 20 + i * 50); pfosten.setMatrixAt(i * 2 + 1, m);
 }
 pfosten.castShadow = true; scene.add(pfosten);
-
-// Berge am Horizont
 const bergMat = new THREE.MeshLambertMaterial({ color: 0x5e8f5a, flatShading: true });
 for (let i = 0; i < 36; i++) {
   const w = (i / 36) * Math.PI * 2, r = 2050 + zufall() * 200;
@@ -200,46 +315,52 @@ for (let i = 0; i < 36; i++) {
   scene.add(berg);
 }
 
-// ---------- Das Auto (eigenes Design: kleiner orangefarbener Keil-Flitzer) ----------
+// ---------- Das Auto (eigenes Design: orangefarbener Keil-Flitzer) ----------
 const auto = new THREE.Group();
 const lack = new THREE.MeshLambertMaterial({ color: 0xff8a1f, flatShading: true });
 const dunkel = new THREE.MeshLambertMaterial({ color: 0x23324a, flatShading: true });
 const koerper = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.5, 3.8), lack);
-koerper.position.y = 0.55;
 const kabine = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.45, 1.6), dunkel);
-kabine.position.set(0, 1.0, -0.3);
+kabine.position.set(0, 0.45, -0.3);
 const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 0.4), dunkel);
-spoiler.position.set(0, 1.05, -1.75);
+spoiler.position.set(0, 0.5, -1.75);
 for (const t of [koerper, kabine, spoiler]) { t.castShadow = true; auto.add(t); }
-// Rücklichter (leuchten beim Bremsen)
 const lichtAus = new THREE.MeshBasicMaterial({ color: 0x661111 });
 const lichtAn = new THREE.MeshBasicMaterial({ color: 0xff2222 });
 const ruecklichter = [-0.6, 0.6].map(x => {
   const l = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.05), lichtAus);
-  l.position.set(x, 0.65, -1.92); auto.add(l); return l;
+  l.position.set(x, 0.1, -1.92); auto.add(l); return l;
 });
-// Räder: vorne lenkbar
-const radGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.35, 10); radGeo.rotateZ(Math.PI / 2);
+const radGeo = new THREE.CylinderGeometry(P.RAD_RADIUS, P.RAD_RADIUS, 0.35, 10); radGeo.rotateZ(Math.PI / 2);
 const radMat = new THREE.MeshLambertMaterial({ color: 0x1b1b1b, flatShading: true });
-const raeder = [], vorderAchse = [];
-for (const [x, z, vorn] of [[-0.95, 1.3, true], [0.95, 1.3, true], [-0.95, -1.3, false], [0.95, -1.3, false]]) {
-  const halter = new THREE.Group(); halter.position.set(x, 0.42, z);
-  const rad = new THREE.Mesh(radGeo, radMat); rad.castShadow = true;
-  halter.add(rad); auto.add(halter); raeder.push(rad);
-  if (vorn) vorderAchse.push(halter);
-}
+const RAEDER = [[-0.95, 1.3, true], [0.95, 1.3, true], [-0.95, -1.3, false], [0.95, -1.3, false]]
+  .map(([x, z, vorn]) => {
+    const halter = new THREE.Group(); halter.position.set(x, -0.4, z);
+    const rad = new THREE.Mesh(radGeo, radMat); rad.castShadow = true;
+    halter.add(rad); auto.add(halter);
+    return { lokal: new THREE.Vector3(x, 0, z), vorn, halter, rad, abstand: P.FEDER_LAENGE + P.RAD_RADIUS, kontakt: false };
+  });
 scene.add(auto);
 
+// Physik-Körper des Autos
+const autoKoerper = welt.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
+  .setTranslation(START.x, START.y, START.z).setCanSleep(false).setCcdEnabled(true));
+const autoCollider = welt.createCollider(RAPIER.ColliderDesc.cuboid(0.9, 0.25, 1.9)
+  .setMass(P.MASSE).setFriction(0.3)
+  .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), autoKoerper);
+const ereignisse = new RAPIER.EventQueue(true);
+const wandNach = new Map(wandCollider.map(c => [c.handle, c]));
+
 // ---------- Zustand ----------
-const zustand = {
-  x: 0, z: 0, yaw: 0,   // Position und Blickrichtung
-  v: 0,                 // Tempo in km/h (negativ = rückwärts)
-  lenk: 0,              // aktueller Radeinschlag (rad)
-  zeit: 0, laeuft: false, pause: false,
-};
+const zustand = { lenk: 0, zeit: 0, laeuft: false, pause: false, kontakte: 0, wandVorher: false, wandPause: 0 };
 function zuruecksetzen() {
-  Object.assign(zustand, { x: 0, z: 0, yaw: 0, v: 0, lenk: 0, zeit: 0, laeuft: false });
+  autoKoerper.setTranslation(START, true);
+  autoKoerper.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+  autoKoerper.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  autoKoerper.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  Object.assign(zustand, { lenk: 0, zeit: 0, laeuft: false, ausrichten: null });
   kamYaw = 0;
+  messung.null100 = null; messung.brems = null;
 }
 
 // ---------- Eingabe: Tastatur ----------
@@ -251,7 +372,7 @@ const TASTEN = {
 addEventListener('keydown', e => {
   if (e.repeat) return;
   tasten.add(e.code);
-  if (e.code === 'KeyR' || e.code === 'KeyT' || e.code === 'Enter' || e.code === 'Backspace') zuruecksetzen();
+  if (['KeyR', 'KeyT', 'Enter', 'Backspace'].includes(e.code)) zuruecksetzen();
   if (e.code === 'KeyP' || e.code === 'Space') pauseUmschalten();
   if (e.code === 'KeyC') kameraUmschalten();
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -260,7 +381,7 @@ addEventListener('keyup', e => tasten.delete(e.code));
 addEventListener('blur', () => tasten.clear());
 
 // ---------- Eingabe: Touch (mehrere Finger, Daumen darf zwischen ▲ und ▼ rutschen) ----------
-const finger = new Map(); // Finger-ID -> Aktion
+const finger = new Map();
 const haltKnoepfe = [...document.querySelectorAll('[data-halten]')];
 function aktionUnter(x, y) {
   const el = document.elementFromPoint(x, y);
@@ -277,16 +398,14 @@ document.addEventListener('pointermove', e => {
 for (const typ of ['pointerup', 'pointercancel']) document.addEventListener(typ, e => finger.delete(e.pointerId));
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault());
-
 function gedrueckt(aktion) {
   for (const a of finger.values()) if (a === aktion) return true;
   return TASTEN[aktion].some(c => tasten.has(c));
 }
-
-// Einfache Knöpfe
 const tipp = (id, fn) => document.getElementById(id).addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
 tipp('reset', zuruecksetzen);
 tipp('pause', pauseUmschalten);
+tipp('pausiert', pauseUmschalten);
 tipp('kamera', kameraUmschalten);
 function pauseUmschalten() {
   zustand.pause = !zustand.pause;
@@ -295,68 +414,214 @@ function pauseUmschalten() {
 let cockpit = false;
 function kameraUmschalten() { cockpit = !cockpit; }
 
-// ---------- Fahrphysik (ein Schritt) ----------
+// ---------- Fahrphysik ----------
+const quat = new THREE.Quaternion(), oben = V(), vorn = V(), seite = V();
+const pos = V(), lin = V(), ang = V(), punkt = V(), hebel = V(), vPunkt = V();
+
 function maxEinschlag(tempo) {
   tempo = Math.abs(tempo);
   return tempo <= P.LENK_KNICK ? P.LENK_MAX : P.LENK_MAX * Math.pow(P.LENK_KNICK / tempo, P.LENK_EXP);
 }
-function physikSchritt(dt, gas, bremse, links, rechts) {
-  const s = zustand;
-  if ((gas || bremse) && !s.laeuft) s.laeuft = true; // Uhr startet mit Gas oder Bremse
-  let v = s.v;
+// Neues Vorwärts-Tempo nach den gemessenen Formeln (km/h)
+function neuesTempo(v, gas, bremse, dt) {
   if (gas && !bremse) {
-    if (v < 0) v = Math.min(0, v + P.BREMSE * dt);           // rückwärts rollend: erst abbremsen
-    else v += (P.ANTRIEB - P.WIDERSTAND * v) * dt;
-  } else if (bremse) {
-    if (v > 0) v = Math.max(0, v - P.BREMSE * dt);           // bremsen
-    else v -= (P.RUECK_ANTRIEB * (1 - (-v) / P.RUECK_MAX)) * dt; // rückwärts fahren
-  } else {
-    v -= P.WIDERSTAND * v * dt;                              // rollen
-    if (Math.abs(v) < 1) v -= Math.sign(v) * Math.min(Math.abs(v), 2 * dt); // ausrollen bis Stillstand
+    if (v < 0) return Math.min(0, v + P.BREMSE * dt);            // rückwärts rollend: erst abbremsen
+    return v + (P.ANTRIEB - P.WIDERSTAND * v) * dt;
   }
-  s.v = v;
+  if (bremse) {
+    if (v > 0) return Math.max(0, v - P.BREMSE * dt);             // bremsen
+    return v - P.RUECK_ANTRIEB * (1 - (v / P.RUECK_MAX) ** 2) * dt; // rückwärts fahren
+  }
+  v -= P.WIDERSTAND * v * dt;                                     // rollen
+  if (Math.abs(v) < 1) v -= Math.sign(v) * Math.min(Math.abs(v), 2 * dt);
+  return v;
+}
 
-  // Lenkung: digital, Einschlag baut sich mit 4 rad/s auf
-  const ziel = ((links ? 1 : 0) - (rechts ? 1 : 0)) * maxEinschlag(v);
-  const d = ziel - s.lenk, maxD = P.LENK_RATE * dt;
-  s.lenk += Math.max(-maxD, Math.min(maxD, d));
+function physikSchritt(dt, gas, bremse, links, rechts) {
+  if ((gas || bremse) && !zustand.laeuft) zustand.laeuft = true; // Uhr startet mit Gas oder Bremse
 
-  const ms = v / 3.6;
-  s.yaw += ms * Math.tan(s.lenk) / P.RADSTAND * dt;
-  s.x += Math.sin(s.yaw) * ms * dt;
-  s.z += Math.cos(s.yaw) * ms * dt;
+  const t = autoKoerper.translation(), r = autoKoerper.rotation();
+  pos.set(t.x, t.y, t.z); quat.set(r.x, r.y, r.z, r.w);
+  oben.set(0, 1, 0).applyQuaternion(quat);
+  vorn.set(0, 0, 1).applyQuaternion(quat);
+  seite.set(1, 0, 0).applyQuaternion(quat);
+  const lv = autoKoerper.linvel(), av = autoKoerper.angvel();
+  lin.set(lv.x, lv.y, lv.z); ang.set(av.x, av.y, av.z);
 
-  // Weltrand: Auto prallt zurück
-  const r = Math.hypot(s.x, s.z);
-  if (r > P.WELT_RAND) { s.x *= P.WELT_RAND / r; s.z *= P.WELT_RAND / r; s.v = -0.1 * s.v; }
+  // 1) Vier Federn: Strahl von jedem Aufhängepunkt nach unten
+  let kontakte = 0;
+  const maxL = P.FEDER_LAENGE + P.RAD_RADIUS;
+  for (const rad of RAEDER) {
+    punkt.copy(rad.lokal).applyQuaternion(quat).add(pos);
+    const strahl = new RAPIER.Ray(punkt, { x: -oben.x, y: -oben.y, z: -oben.z });
+    const treffer = welt.castRay(strahl, maxL, true, undefined, undefined, undefined, autoKoerper);
+    rad.abstand = maxL; rad.kontakt = false;
+    if (!treffer) continue;
+    const d = treffer.toi ?? treffer.timeOfImpact;
+    const einfederung = maxL - d;
+    if (einfederung <= 0) continue;
+    rad.abstand = d; rad.kontakt = true; kontakte++;
+    hebel.subVectors(punkt, pos);
+    vPunkt.crossVectors(ang, hebel).add(lin);
+    const kraft = Math.max(0, FEDER_K * einfederung - FEDER_C * vPunkt.dot(oben));
+    const s = kraft * dt;
+    autoKoerper.applyImpulseAtPoint({ x: oben.x * s, y: oben.y * s, z: oben.z * s }, punkt, true);
+  }
+  zustand.kontakte = kontakte;
 
-  if (s.laeuft) s.zeit += dt;
+  // Lenkeinschlag baut sich mit 4 rad/s auf
+  const lv2 = autoKoerper.linvel(), av2 = autoKoerper.angvel();
+  lin.set(lv2.x, lv2.y, lv2.z); ang.set(av2.x, av2.y, av2.z);
+  const vf = lin.dot(vorn) * 3.6;
+  const ziel = ((links ? 1 : 0) - (rechts ? 1 : 0)) * maxEinschlag(vf);
+  const d = ziel - zustand.lenk, maxD = P.LENK_RATE * dt;
+  zustand.lenk += Math.max(-maxD, Math.min(maxD, d));
+
+  if (kontakte > 0) {
+    // 2) Am Boden: Antrieb/Bremse/Widerstand, seitlicher Grip, Drehung aus der Lenkung
+    const g = Math.min(1, kontakte / 2);
+    const vfNeu = neuesTempo(vf, gas, bremse, dt);
+    lin.addScaledVector(vorn, (vfNeu - vf) / 3.6 * g);
+    const vs = lin.dot(seite);
+    lin.addScaledVector(seite, -vs * (1 - Math.exp(-P.GRIP * dt)) * g);
+    const dMax = P.DREH_MAX * Math.PI / 180;
+    let zielDreh = Math.max(-dMax, Math.min(dMax, (vf / 3.6) * Math.tan(zustand.lenk) / P.RADSTAND));
+    const a = zustand.ausrichten;   // nach Streifen an der Wand: kurz parallel zur Wand drehen
+    if (a && a.zeit > 0) { zielDreh = a.rate; a.zeit -= dt; }
+    ang.addScaledVector(oben, (zielDreh - ang.dot(oben)) * g);
+  } else {
+    // 3) In der Luft: nur Luftwiderstand, Drehung bleibt fast erhalten, ▼ = Luftbremse
+    lin.x -= P.WIDERSTAND * lin.x * dt; lin.z -= P.WIDERSTAND * lin.z * dt;
+    ang.multiplyScalar(1 - P.LUFT_DREHVERLUST * dt);
+    if (bremse) {
+      const w = ang.length();
+      if (w > 0) ang.multiplyScalar(Math.max(0, w - P.LUFTBREMSE * dt) / w);
+    }
+  }
+  autoKoerper.setLinvel(lin, true);
+  autoKoerper.setAngvel(ang, true);
+
+  welt.step(ereignisse);
+
+  // 4) Wände: streifender Treffer kostet ca. 60 % Tempo, frontal prallt das Auto zurück
+  let anWand = false, wand = null;
+  ereignisse.drainCollisionEvents((h1, h2, beginnt) => {
+    const w = wandNach.get(h1) || wandNach.get(h2);
+    if (beginnt && w) { anWand = true; wand = w; }
+  });
+  for (const w of wandCollider) {
+    welt.contactPair(autoCollider, w, (manifold) => { if (manifold.numContacts() > 0) { anWand = true; wand = wand || w; } });
+  }
+  zustand.trefferZahl = (zustand.trefferZahl || 0);
+  zustand.wandPause = Math.max(0, zustand.wandPause - dt);
+  if (anWand && wand && !zustand.wandVorher && zustand.wandPause === 0 && Math.abs(vf) > 5) {
+    zustand.trefferZahl++;
+    const lv3 = autoKoerper.linvel();
+    const n = wand.wandNormale;
+    // Aufprallwinkel: wie direkt fährt das Auto auf die Wand zu? (vorn = Richtung vor dem Treffer)
+    const hx = vorn.x, hz = vorn.z, hl = Math.hypot(hx, hz) || 1;
+    const direkt = Math.abs(hx * n.x + hz * n.z) / hl;
+    if (direkt > 0.5) {
+      // frontal (steiler als 30°): Rückprall mit 11 % des Tempos
+      const r = -P.WAND_RUECKPRALL * vf / 3.6;
+      autoKoerper.setLinvel({ x: hx / hl * r, y: lv3.y, z: hz / hl * r }, true);
+    } else {
+      // streifend: entlang der Wand weiter mit 42 % des Tempos, Auto richtet sich parallel aus
+      let tx = -n.z, tz = n.x;
+      if (tx * hx + tz * hz < 0) { tx = -tx; tz = -tz; }
+      const v = P.WAND_STREIF * Math.abs(vf) / 3.6;
+      autoKoerper.setLinvel({ x: tx * v, y: lv3.y, z: tz * v }, true);
+      let diff = Math.atan2(tx, tz) - Math.atan2(hx, hz);
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      zustand.ausrichten = { rate: diff / 0.15, zeit: 0.15 };
+    }
+  }
+  if (anWand) zustand.wandPause = 0.4; // neuer Treffer erst nach 0,4 s ohne Wandkontakt
+  zustand.wandVorher = anWand;
+
+  // Weltrand
+  const p2 = autoKoerper.translation();
+  const rr = Math.hypot(p2.x, p2.z);
+  if (rr > P.WELT_RAND) {
+    const f = (P.WELT_RAND - 1) / rr;
+    autoKoerper.setTranslation({ x: p2.x * f, y: p2.y, z: p2.z * f }, true);
+    const lv4 = autoKoerper.linvel();
+    autoKoerper.setLinvel({ x: -0.2 * lv4.x, y: lv4.y, z: -0.2 * lv4.z }, true);
+  }
+  if (p2.y < -50) zuruecksetzen();
+
+  if (zustand.laeuft) zustand.zeit += dt;
+  messen(dt, gas, bremse, links || rechts, vf);
+}
+
+// ---------- Messanzeige (zum Vergleich mit den Werten aus der Spezifikation) ----------
+const messung = { null100: null, brems: null, flug: 0 };
+const el = id => document.getElementById(id);
+function messen(dt, gas, bremse, lenkt, vf) {
+  const t = zustand.zeit;
+  const p = autoKoerper.translation();
+  // 0 → 100: aus dem Stand mit Vollgas (Sollwert 1,5 s)
+  if (gas && !bremse && Math.abs(vf) < 1 && !messung.null100) messung.null100 = { start: t };
+  if (!gas || bremse) messung.null100 = null;
+  if (messung.null100 && vf >= 100) {
+    el('m100').textContent = `${(t - messung.null100.start).toFixed(2)} s (Soll 1,5 s)`;
+    messung.null100 = null;
+  }
+  // Bremsweg: ab Bremsbeginn bis Stillstand (Soll: aus 133 km/h ca. 10 m)
+  if (bremse && !gas && vf > 20 && zustand.kontakte > 0 && !messung.brems)
+    messung.brems = { x: p.x, z: p.z, v: vf, t };
+  if (!bremse) messung.brems = null;
+  if (messung.brems && vf <= 0.5) {
+    const b = messung.brems, weg = Math.hypot(p.x - b.x, p.z - b.z);
+    el('mbrems').textContent = `aus ${Math.round(b.v)} km/h: ${weg.toFixed(1)} m in ${(t - b.t).toFixed(2)} s`;
+    messung.brems = null;
+  }
+  // Drehrate beim Lenken (Soll 60–70 °/s bei 30–150 km/h)
+  if (lenkt && zustand.kontakte > 0 && Math.abs(vf) > 10) {
+    const w = autoKoerper.angvel();
+    el('mdreh').textContent = `${Math.round(Math.abs(w.y) * 180 / Math.PI)} °/s bei ${Math.round(Math.abs(vf))} km/h`;
+  }
+  // Flugzeit
+  if (zustand.kontakte === 0) messung.flug += dt;
+  else {
+    if (messung.flug > 0.3) el('mflug').textContent = `${messung.flug.toFixed(2)} s`;
+    messung.flug = 0;
+  }
 }
 
 // ---------- Kamera ----------
 let kamYaw = 0;
+const kamPos = V(), blick = V();
 function kameraNachfuehren(dt) {
-  const s = zustand;
-  // Blickrichtung zieht leicht nach (wie im Vorbild)
-  let diff = s.yaw - kamYaw;
-  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-  kamYaw += diff * (1 - Math.exp(-dt * 6));
+  const t = autoKoerper.translation(), r = autoKoerper.rotation();
+  quat.set(r.x, r.y, r.z, r.w);
+  vorn.set(0, 0, 1).applyQuaternion(quat);
+  if (Math.hypot(vorn.x, vorn.z) > 0.2) {
+    const autoYaw = Math.atan2(vorn.x, vorn.z);
+    let diff = autoYaw - kamYaw;
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    kamYaw += diff * (1 - Math.exp(-dt * 6));
+  }
   const fx = Math.sin(kamYaw), fz = Math.cos(kamYaw);
   if (cockpit) {
-    camera.position.set(s.x + Math.sin(s.yaw) * 0.2, 1.25, s.z + Math.cos(s.yaw) * 0.2);
-    camera.lookAt(s.x + Math.sin(s.yaw) * 20, 1.0, s.z + Math.cos(s.yaw) * 20);
+    oben.set(0, 1, 0).applyQuaternion(quat);
+    camera.position.set(t.x, t.y, t.z).addScaledVector(oben, 0.7).addScaledVector(vorn, 0.2);
+    blick.set(t.x, t.y, t.z).addScaledVector(vorn, 20).addScaledVector(oben, 0.4);
+    camera.up.copy(oben);
   } else {
-    camera.position.set(s.x - fx * 7.5, 3.2, s.z - fz * 7.5);
-    camera.lookAt(s.x + fx * 4, 1.0, s.z + fz * 4);
+    kamPos.set(t.x - fx * 7.5, t.y + 2.6, t.z - fz * 7.5);
+    camera.position.lerp(kamPos, 1 - Math.exp(-dt * 12));
+    blick.set(t.x + fx * 4, t.y + 0.4, t.z + fz * 4);
+    camera.up.set(0, 1, 0);
   }
-  // Sichtfeld wird bei hohem Tempo etwas weiter
-  const fov = 68 + Math.min(18, Math.abs(s.v) / 30);
+  camera.lookAt(blick);
+  const v = autoKoerper.linvel();
+  const fov = 68 + Math.min(18, Math.hypot(v.x, v.y, v.z) * 3.6 / 30);
   if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
 }
 
 // ---------- Anzeige ----------
-const zeitEl = document.getElementById('zeit'), tempoEl = document.getElementById('tempo');
-const hinweis = document.getElementById('hinweis');
+const zeitEl = el('zeit'), tempoEl = el('tempo'), hinweis = el('hinweis');
 function zeitText(t) {
   const ms = Math.floor(t * 1000);
   const min = Math.floor(ms / 60000), sek = Math.floor(ms / 1000) % 60;
@@ -366,7 +631,7 @@ function zeitText(t) {
 // ---------- Hauptschleife ----------
 let rest = 0, letzte = performance.now();
 function bild(jetzt) {
-  const dt = Math.min(0.25, (jetzt - letzte) / 1000); letzte = jetzt;
+  const dt = Math.min(0.1, (jetzt - letzte) / 1000); letzte = jetzt;
   const gas = gedrueckt('gas'), bremse = gedrueckt('bremse');
   const links = gedrueckt('links'), rechts = gedrueckt('rechts');
 
@@ -375,43 +640,53 @@ function bild(jetzt) {
     while (rest >= P.SCHRITT) { physikSchritt(P.SCHRITT, gas, bremse, links, rechts); rest -= P.SCHRITT; }
   }
 
-  // Auto-Modell nachziehen
-  const s = zustand;
-  auto.position.set(s.x, 0, s.z);
-  auto.rotation.y = s.yaw;
-  for (const h of vorderAchse) h.rotation.y = s.lenk;
-  if (!s.pause) for (const r of raeder) r.rotation.x += (s.v / 3.6) / 0.42 * dt;
-  const bremsLicht = bremse && s.v > 0;
+  // Auto-Modell an die Physik anhängen
+  const t = autoKoerper.translation(), r = autoKoerper.rotation();
+  auto.position.set(t.x, t.y, t.z);
+  auto.quaternion.set(r.x, r.y, r.z, r.w);
+  const lv = autoKoerper.linvel();
+  quat.set(r.x, r.y, r.z, r.w); vorn.set(0, 0, 1).applyQuaternion(quat);
+  const vf = lv.x * vorn.x + lv.y * vorn.y + lv.z * vorn.z;
+  for (const rad of RAEDER) {
+    rad.halter.position.y = -(rad.abstand - P.RAD_RADIUS);
+    if (rad.vorn) rad.halter.rotation.y = zustand.lenk;
+    if (!zustand.pause) rad.rad.rotation.x += vf / P.RAD_RADIUS * dt;
+  }
+  const bremsLicht = bremse && vf > 0.1;
   for (const l of ruecklichter) l.material = bremsLicht ? lichtAn : lichtAus;
 
-  // Schatten-Licht wandert mit dem Auto
-  sonne.position.set(s.x + 30, 60, s.z - 20);
-  sonne.target.position.set(s.x, 0, s.z);
-
+  sonne.position.set(t.x + 30, t.y + 60, t.z - 20);
+  sonne.target.position.set(t.x, t.y, t.z);
   kameraNachfuehren(dt);
 
-  // Anzeigen
-  zeitEl.textContent = zeitText(s.zeit);
-  tempoEl.textContent = Math.round(Math.abs(s.v));
-  hinweis.style.opacity = s.laeuft ? 0 : 1;
+  zeitEl.textContent = zeitText(zustand.zeit);
+  tempoEl.textContent = Math.round(Math.hypot(lv.x, lv.y, lv.z) * 3.6);
+  hinweis.style.opacity = zustand.laeuft ? 0 : 1;
   for (const k of haltKnoepfe) k.classList.toggle('an', gedrueckt(k.dataset.halten));
 
   renderer.render(scene, camera);
   requestAnimationFrame(bild);
 }
+zuruecksetzen();
+el('laden').style.display = 'none';
 requestAnimationFrame(bild);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+// Zum Testen am PC (Konsole): Zugriff auf Auto und Werte
+window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung };
 </script>
 <script>
-  // Falls etwas nicht lädt (z. B. kein Internet), eine Meldung zeigen statt schwarzem Bild
   addEventListener('error', e => {
     const f = document.getElementById('fehler');
     f.style.display = 'block'; f.textContent = 'Fehler: ' + (e.message || 'Datei konnte nicht geladen werden');
   }, true);
+  addEventListener('unhandledrejection', e => {
+    const f = document.getElementById('fehler');
+    f.style.display = 'block'; f.textContent = 'Fehler: ' + (e.reason && e.reason.message || e.reason);
+  });
 </script>
 </body>
 </html>
