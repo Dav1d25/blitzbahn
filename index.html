@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Blitzbahn</title>
+<style>
+  :root {
+    --knopf: rgba(20, 40, 80, 0.55);
+    --knopf-an: rgba(255, 170, 40, 0.75);
+    --rand-o: max(14px, env(safe-area-inset-top));
+    --rand-u: max(18px, env(safe-area-inset-bottom));
+    --rand-l: max(18px, env(safe-area-inset-left));
+    --rand-r: max(18px, env(safe-area-inset-right));
+    --gross: clamp(84px, 9vw, 120px);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: #87b9e8;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  canvas { display: block; }
+
+  /* Anzeigen oben */
+  #hud {
+    position: fixed; top: var(--rand-o); left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; align-items: center; pointer-events: none;
+  }
+  .feld {
+    background: rgba(15, 30, 60, 0.7); color: #fff; border-radius: 10px;
+    padding: 6px 14px; font-variant-numeric: tabular-nums; text-align: center;
+  }
+  .feld small { display: block; font-size: 11px; opacity: 0.7; letter-spacing: 0.08em; }
+  .feld b { font-size: 26px; font-weight: 700; }
+  #pause { pointer-events: auto; }
+
+  /* Touch-Knöpfe */
+  .knopf {
+    position: fixed; width: var(--gross); height: var(--gross);
+    background: var(--knopf); border: 2px solid rgba(255,255,255,0.35);
+    border-radius: 18px; color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--gross) * 0.42); line-height: 1; cursor: pointer;
+  }
+  .knopf.an { background: var(--knopf-an); }
+  .klein { width: calc(var(--gross) * 0.72); height: calc(var(--gross) * 0.72); font-size: calc(var(--gross) * 0.32); }
+  #gas    { left: var(--rand-l); bottom: calc(var(--rand-u) + var(--gross) + 12px); }
+  #bremse { left: var(--rand-l); bottom: var(--rand-u); }
+  #links  { right: calc(var(--rand-r) + var(--gross) + 12px); bottom: var(--rand-u); }
+  #rechts { right: var(--rand-r); bottom: var(--rand-u); }
+  #kamera { left: var(--rand-l); top: var(--rand-o); }
+  #reset  { right: var(--rand-r); top: var(--rand-o); }
+  #pause  { position: static; width: 54px; height: 54px; font-size: 22px; border-radius: 12px; }
+
+  #hinweis {
+    position: fixed; left: 50%; top: 28%; transform: translateX(-50%);
+    background: rgba(15, 30, 60, 0.75); color: #fff; padding: 12px 20px; border-radius: 12px;
+    font-size: 18px; text-align: center; pointer-events: none; transition: opacity 0.6s;
+  }
+  #pausiert {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(10, 20, 40, 0.5); color: #fff; font-size: 48px; font-weight: 800;
+  }
+  #quer {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: #13264a; color: #fff; font-size: 24px; text-align: center; padding: 30px; z-index: 10;
+  }
+  @media (orientation: portrait) and (pointer: coarse) { #quer { display: flex; } }
+  #fehler { position: fixed; left: 10px; bottom: 10px; color: #b00; background: #fff; padding: 6px; display: none; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<div id="hud">
+  <div class="feld"><small>ZEIT</small><b id="zeit">00:00.000</b></div>
+  <div id="pause" class="knopf" title="Pause (P)">❚❚</div>
+  <div class="feld"><small>KM/H</small><b id="tempo">0</b></div>
+</div>
+
+<div id="kamera" class="knopf klein" title="Kamera (C)">🎥</div>
+<div id="reset"  class="knopf klein" title="Zurück zum Start (R)">↺</div>
+<div id="gas"    class="knopf" data-halten="gas">▲</div>
+<div id="bremse" class="knopf" data-halten="bremse">▼</div>
+<div id="links"  class="knopf" data-halten="links">◀</div>
+<div id="rechts" class="knopf" data-halten="rechts">▶</div>
+
+<div id="hinweis">▲ halten = Gas &nbsp;·&nbsp; ▼ = Bremse/Rückwärts &nbsp;·&nbsp; ◀ ▶ = Lenken<br><small>Am PC: W A S D oder Pfeiltasten, R = Reset</small></div>
+<div id="pausiert">Pause</div>
+<div id="quer">Bitte das iPad quer halten 🔄</div>
+<div id="fehler"></div>
+
+<script type="module">
+import * as THREE from 'three';
+
+// =====================================================================
+//  FAHRWERTE – alle Zahlen aus der Spezifikation (Abschnitt 3.3 / 3.5)
+//  Tempo immer in km/h, Zeit in Sekunden.
+// =====================================================================
+const P = {
+  ANTRIEB: 71.8,        // +km/h pro Sekunde bei Vollgas
+  WIDERSTAND: 0.1045,   // −0,1045 × Tempo pro Sekunde
+  BREMSE: 250,          // −km/h pro Sekunde
+  RUECK_ANTRIEB: 34,    // Rückwärts: Beschleunigung am Anfang
+  RUECK_MAX: 38.5,      // Rückwärts: Höchsttempo
+  LENK_MAX: 0.41,       // größter Radeinschlag (rad) bis LENK_KNICK km/h
+  LENK_KNICK: 45,
+  LENK_EXP: 1.4,        // Einschlag = 0,41 × (45 / Tempo)^1,4
+  LENK_RATE: 4,         // rad pro Sekunde Ein-/Auslenken
+  RADSTAND: 3.0,        // m, ergibt ca. 25 m Kurvenradius bei 100 km/h
+  SCHRITT: 1 / 240,     // Physik-Schritt (240 pro Sekunde)
+  WELT_RAND: 1900,      // m vom Start: dort ist die Welt zu Ende
+};
+
+// ---------- Grundgerüst: Bildfläche, Szene, Licht ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const himmel = new THREE.Color(0x87b9e8);
+scene.background = himmel;
+scene.fog = new THREE.Fog(himmel, 250, 1400);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 3000);
+
+scene.add(new THREE.HemisphereLight(0xdff0ff, 0x4a6b3a, 1.4));
+const sonne = new THREE.DirectionalLight(0xffffff, 2.2);
+sonne.castShadow = true;
+sonne.shadow.mapSize.set(1024, 1024);
+Object.assign(sonne.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 120 });
+scene.add(sonne, sonne.target);
+
+// ---------- Boden: große Ebene mit Karomuster (damit man Tempo sieht) ----------
+function bodenTextur() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#6fae4f'; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = '#66a448'; g.fillRect(0, 0, 64, 64); g.fillRect(64, 64, 64, 64);
+  g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 2; g.strokeRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const BODEN = 4000;
+const tex = bodenTextur(); tex.repeat.set(BODEN / 20, BODEN / 20); // ein Karo = 10 m
+const boden = new THREE.Mesh(new THREE.PlaneGeometry(BODEN, BODEN),
+  new THREE.MeshLambertMaterial({ map: tex }));
+boden.rotation.x = -Math.PI / 2; boden.receiveShadow = true;
+scene.add(boden);
+
+// Startlinie
+const linie = new THREE.Mesh(new THREE.PlaneGeometry(12, 1.5), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+linie.rotation.x = -Math.PI / 2; linie.position.set(0, 0.02, 3);
+scene.add(linie);
+
+// Bäume und Pfosten als Orientierung (immer gleich verteilt)
+let saat = 7;
+const zufall = () => (saat = (saat * 16807) % 2147483647) / 2147483647;
+const stamm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.4, 0.5, 3, 5),
+  new THREE.MeshLambertMaterial({ color: 0x7a5232 }), 400);
+const krone = new THREE.InstancedMesh(new THREE.ConeGeometry(2.6, 7, 6),
+  new THREE.MeshLambertMaterial({ color: 0x2f7a3a, flatShading: true }), 400);
+const m = new THREE.Matrix4();
+for (let i = 0; i < 400; i++) {
+  let x, z;
+  do { x = (zufall() - 0.5) * 3600; z = (zufall() - 0.5) * 3600; } while (Math.hypot(x, z) < 40);
+  const s = 0.7 + zufall() * 0.8;
+  m.makeScale(s, s, s).setPosition(x, 1.5 * s, z); stamm.setMatrixAt(i, m);
+  m.makeScale(s, s, s).setPosition(x, 6 * s, z); krone.setMatrixAt(i, m);
+}
+stamm.castShadow = krone.castShadow = true;
+scene.add(stamm, krone);
+// Pfosten-Allee geradeaus (alle 50 m), gut zum Tempo-Gefühl
+const pfosten = new THREE.InstancedMesh(new THREE.BoxGeometry(0.6, 2.5, 0.6),
+  new THREE.MeshLambertMaterial({ color: 0xff7a1a }), 160);
+for (let i = 0; i < 80; i++) {
+  m.makeTranslation(-8, 1.25, 20 + i * 50); pfosten.setMatrixAt(i * 2, m);
+  m.makeTranslation(8, 1.25, 20 + i * 50); pfosten.setMatrixAt(i * 2 + 1, m);
+}
+pfosten.castShadow = true; scene.add(pfosten);
+
+// Berge am Horizont
+const bergMat = new THREE.MeshLambertMaterial({ color: 0x5e8f5a, flatShading: true });
+for (let i = 0; i < 36; i++) {
+  const w = (i / 36) * Math.PI * 2, r = 2050 + zufall() * 200;
+  const berg = new THREE.Mesh(new THREE.ConeGeometry(200 + zufall() * 150, 150 + zufall() * 200, 5), bergMat);
+  berg.position.set(Math.sin(w) * r, 70, Math.cos(w) * r);
+  scene.add(berg);
+}
+
+// ---------- Das Auto (eigenes Design: kleiner orangefarbener Keil-Flitzer) ----------
+const auto = new THREE.Group();
+const lack = new THREE.MeshLambertMaterial({ color: 0xff8a1f, flatShading: true });
+const dunkel = new THREE.MeshLambertMaterial({ color: 0x23324a, flatShading: true });
+const koerper = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.5, 3.8), lack);
+koerper.position.y = 0.55;
+const kabine = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.45, 1.6), dunkel);
+kabine.position.set(0, 1.0, -0.3);
+const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 0.4), dunkel);
+spoiler.position.set(0, 1.05, -1.75);
+for (const t of [koerper, kabine, spoiler]) { t.castShadow = true; auto.add(t); }
+// Rücklichter (leuchten beim Bremsen)
+const lichtAus = new THREE.MeshBasicMaterial({ color: 0x661111 });
+const lichtAn = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+const ruecklichter = [-0.6, 0.6].map(x => {
+  const l = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.05), lichtAus);
+  l.position.set(x, 0.65, -1.92); auto.add(l); return l;
+});
+// Räder: vorne lenkbar
+const radGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.35, 10); radGeo.rotateZ(Math.PI / 2);
+const radMat = new THREE.MeshLambertMaterial({ color: 0x1b1b1b, flatShading: true });
+const raeder = [], vorderAchse = [];
+for (const [x, z, vorn] of [[-0.95, 1.3, true], [0.95, 1.3, true], [-0.95, -1.3, false], [0.95, -1.3, false]]) {
+  const halter = new THREE.Group(); halter.position.set(x, 0.42, z);
+  const rad = new THREE.Mesh(radGeo, radMat); rad.castShadow = true;
+  halter.add(rad); auto.add(halter); raeder.push(rad);
+  if (vorn) vorderAchse.push(halter);
+}
+scene.add(auto);
+
+// ---------- Zustand ----------
+const zustand = {
+  x: 0, z: 0, yaw: 0,   // Position und Blickrichtung
+  v: 0,                 // Tempo in km/h (negativ = rückwärts)
+  lenk: 0,              // aktueller Radeinschlag (rad)
+  zeit: 0, laeuft: false, pause: false,
+};
+function zuruecksetzen() {
+  Object.assign(zustand, { x: 0, z: 0, yaw: 0, v: 0, lenk: 0, zeit: 0, laeuft: false });
+  kamYaw = 0;
+}
+
+// ---------- Eingabe: Tastatur ----------
+const tasten = new Set();
+const TASTEN = {
+  gas: ['KeyW', 'ArrowUp'], bremse: ['KeyS', 'ArrowDown'],
+  links: ['KeyA', 'ArrowLeft'], rechts: ['KeyD', 'ArrowRight'],
+};
+addEventListener('keydown', e => {
+  if (e.repeat) return;
+  tasten.add(e.code);
+  if (e.code === 'KeyR' || e.code === 'KeyT' || e.code === 'Enter' || e.code === 'Backspace') zuruecksetzen();
+  if (e.code === 'KeyP' || e.code === 'Space') pauseUmschalten();
+  if (e.code === 'KeyC') kameraUmschalten();
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+});
+addEventListener('keyup', e => tasten.delete(e.code));
+addEventListener('blur', () => tasten.clear());
+
+// ---------- Eingabe: Touch (mehrere Finger, Daumen darf zwischen ▲ und ▼ rutschen) ----------
+const finger = new Map(); // Finger-ID -> Aktion
+const haltKnoepfe = [...document.querySelectorAll('[data-halten]')];
+function aktionUnter(x, y) {
+  const el = document.elementFromPoint(x, y);
+  const k = el && el.closest('[data-halten]');
+  return k ? k.dataset.halten : null;
+}
+document.addEventListener('pointerdown', e => {
+  const a = aktionUnter(e.clientX, e.clientY);
+  if (a) { finger.set(e.pointerId, a); e.preventDefault(); }
+});
+document.addEventListener('pointermove', e => {
+  if (finger.has(e.pointerId)) finger.set(e.pointerId, aktionUnter(e.clientX, e.clientY));
+});
+for (const typ of ['pointerup', 'pointercancel']) document.addEventListener(typ, e => finger.delete(e.pointerId));
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+function gedrueckt(aktion) {
+  for (const a of finger.values()) if (a === aktion) return true;
+  return TASTEN[aktion].some(c => tasten.has(c));
+}
+
+// Einfache Knöpfe
+const tipp = (id, fn) => document.getElementById(id).addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
+tipp('reset', zuruecksetzen);
+tipp('pause', pauseUmschalten);
+tipp('kamera', kameraUmschalten);
+function pauseUmschalten() {
+  zustand.pause = !zustand.pause;
+  document.getElementById('pausiert').style.display = zustand.pause ? 'flex' : 'none';
+}
+let cockpit = false;
+function kameraUmschalten() { cockpit = !cockpit; }
+
+// ---------- Fahrphysik (ein Schritt) ----------
+function maxEinschlag(tempo) {
+  tempo = Math.abs(tempo);
+  return tempo <= P.LENK_KNICK ? P.LENK_MAX : P.LENK_MAX * Math.pow(P.LENK_KNICK / tempo, P.LENK_EXP);
+}
+function physikSchritt(dt, gas, bremse, links, rechts) {
+  const s = zustand;
+  if ((gas || bremse) && !s.laeuft) s.laeuft = true; // Uhr startet mit Gas oder Bremse
+  let v = s.v;
+  if (gas && !bremse) {
+    if (v < 0) v = Math.min(0, v + P.BREMSE * dt);           // rückwärts rollend: erst abbremsen
+    else v += (P.ANTRIEB - P.WIDERSTAND * v) * dt;
+  } else if (bremse) {
+    if (v > 0) v = Math.max(0, v - P.BREMSE * dt);           // bremsen
+    else v -= (P.RUECK_ANTRIEB * (1 - (-v) / P.RUECK_MAX)) * dt; // rückwärts fahren
+  } else {
+    v -= P.WIDERSTAND * v * dt;                              // rollen
+    if (Math.abs(v) < 1) v -= Math.sign(v) * Math.min(Math.abs(v), 2 * dt); // ausrollen bis Stillstand
+  }
+  s.v = v;
+
+  // Lenkung: digital, Einschlag baut sich mit 4 rad/s auf
+  const ziel = ((links ? 1 : 0) - (rechts ? 1 : 0)) * maxEinschlag(v);
+  const d = ziel - s.lenk, maxD = P.LENK_RATE * dt;
+  s.lenk += Math.max(-maxD, Math.min(maxD, d));
+
+  const ms = v / 3.6;
+  s.yaw += ms * Math.tan(s.lenk) / P.RADSTAND * dt;
+  s.x += Math.sin(s.yaw) * ms * dt;
+  s.z += Math.cos(s.yaw) * ms * dt;
+
+  // Weltrand: Auto prallt zurück
+  const r = Math.hypot(s.x, s.z);
+  if (r > P.WELT_RAND) { s.x *= P.WELT_RAND / r; s.z *= P.WELT_RAND / r; s.v = -0.1 * s.v; }
+
+  if (s.laeuft) s.zeit += dt;
+}
+
+// ---------- Kamera ----------
+let kamYaw = 0;
+function kameraNachfuehren(dt) {
+  const s = zustand;
+  // Blickrichtung zieht leicht nach (wie im Vorbild)
+  let diff = s.yaw - kamYaw;
+  diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+  kamYaw += diff * (1 - Math.exp(-dt * 6));
+  const fx = Math.sin(kamYaw), fz = Math.cos(kamYaw);
+  if (cockpit) {
+    camera.position.set(s.x + Math.sin(s.yaw) * 0.2, 1.25, s.z + Math.cos(s.yaw) * 0.2);
+    camera.lookAt(s.x + Math.sin(s.yaw) * 20, 1.0, s.z + Math.cos(s.yaw) * 20);
+  } else {
+    camera.position.set(s.x - fx * 7.5, 3.2, s.z - fz * 7.5);
+    camera.lookAt(s.x + fx * 4, 1.0, s.z + fz * 4);
+  }
+  // Sichtfeld wird bei hohem Tempo etwas weiter
+  const fov = 68 + Math.min(18, Math.abs(s.v) / 30);
+  if (Math.abs(camera.fov - fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
+}
+
+// ---------- Anzeige ----------
+const zeitEl = document.getElementById('zeit'), tempoEl = document.getElementById('tempo');
+const hinweis = document.getElementById('hinweis');
+function zeitText(t) {
+  const ms = Math.floor(t * 1000);
+  const min = Math.floor(ms / 60000), sek = Math.floor(ms / 1000) % 60;
+  return `${String(min).padStart(2, '0')}:${String(sek).padStart(2, '0')}.${String(ms % 1000).padStart(3, '0')}`;
+}
+
+// ---------- Hauptschleife ----------
+let rest = 0, letzte = performance.now();
+function bild(jetzt) {
+  const dt = Math.min(0.25, (jetzt - letzte) / 1000); letzte = jetzt;
+  const gas = gedrueckt('gas'), bremse = gedrueckt('bremse');
+  const links = gedrueckt('links'), rechts = gedrueckt('rechts');
+
+  if (!zustand.pause) {
+    rest += dt;
+    while (rest >= P.SCHRITT) { physikSchritt(P.SCHRITT, gas, bremse, links, rechts); rest -= P.SCHRITT; }
+  }
+
+  // Auto-Modell nachziehen
+  const s = zustand;
+  auto.position.set(s.x, 0, s.z);
+  auto.rotation.y = s.yaw;
+  for (const h of vorderAchse) h.rotation.y = s.lenk;
+  if (!s.pause) for (const r of raeder) r.rotation.x += (s.v / 3.6) / 0.42 * dt;
+  const bremsLicht = bremse && s.v > 0;
+  for (const l of ruecklichter) l.material = bremsLicht ? lichtAn : lichtAus;
+
+  // Schatten-Licht wandert mit dem Auto
+  sonne.position.set(s.x + 30, 60, s.z - 20);
+  sonne.target.position.set(s.x, 0, s.z);
+
+  kameraNachfuehren(dt);
+
+  // Anzeigen
+  zeitEl.textContent = zeitText(s.zeit);
+  tempoEl.textContent = Math.round(Math.abs(s.v));
+  hinweis.style.opacity = s.laeuft ? 0 : 1;
+  for (const k of haltKnoepfe) k.classList.toggle('an', gedrueckt(k.dataset.halten));
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(bild);
+}
+requestAnimationFrame(bild);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+<script>
+  // Falls etwas nicht lädt (z. B. kein Internet), eine Meldung zeigen statt schwarzem Bild
+  addEventListener('error', e => {
+    const f = document.getElementById('fehler');
+    f.style.display = 'block'; f.textContent = 'Fehler: ' + (e.message || 'Datei konnte nicht geladen werden');
+  }, true);
+</script>
+</body>
+</html>
