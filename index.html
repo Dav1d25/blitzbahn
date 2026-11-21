@@ -148,6 +148,7 @@ const P = {
   RADSTAND: 2.6,          // ergibt ca. 25 m Kurvenradius bei 100 km/h
   DREH_MAX: 66,           // °/s – schneller dreht das Auto nie (gemessen: 60–70 °/s bei 30–150 km/h)
   BODENHAFTUNG: 1,        // m/s – so schnell dürfen die Federn das Auto höchstens von der Fahrbahn wegdrücken
+  STEILKURVE_GRIP: 1.8,   // so viel enger kann man in Steilkurven lenken (mehr Tempo möglich)
   KANTEN_DAEMPFUNG: 30,   // wie stark Kippen gebremst wird, wenn nur 1–2 Räder Bodenkontakt haben
   GRIP: 15,             // wie schnell seitliches Rutschen abgebaut wird (höher = weniger Drift)
   // Federung
@@ -162,6 +163,8 @@ const P = {
   LUFTBREMSE: 2.6,       // rad/s² – Luftbremse (▼ in der Luft) bremst das Drehen
   WAND_STREIF: 0.42,      // streifender Wandtreffer: Tempo × 0,42 (110 → 46 km/h)
   WAND_RUECKPRALL: 0.11,  // frontaler Treffer: 251 → −27 km/h
+  WAND_DREHEN: 1.2,       // rad/s – so schnell dreht man sich an der Wand im Stand weg
+  WAND_DRUEBER: 0.42,     // über eine Leitplanke fahren: Tempo × 0,42 (wie streifender Treffer)
   // Technik
   SCHRITT: 1 / 240,       // Physik-Schritt (240 pro Sekunde)
   WELT_RAND: 1900,        // m vom Start: dort ist die Welt zu Ende
@@ -224,7 +227,8 @@ welt.createCollider(RAPIER.ColliderDesc.cuboid(BODEN / 2, 1, BODEN / 2).setFrict
 //  Eine Strecke ist eine Liste von Teilen. Jedes Teil setzt am Ende des vorigen an.
 //  Ein Rasterfeld = 20 m, eine Höhenstufe = 5 m, Fahrbahn 12 m breit.
 // =====================================================================
-const RASTER = 20, STUFE = 5, BREIT = 12, DICKE = 0.5, WAND_H = 1.2, RAND = 0.8, OBEN = 0.05;
+// Leitplanken sind niedriger als der Wagenboden hoch: man kann drüberfahren, wird dabei aber stark gebremst.
+const RASTER = 20, STUFE = 5, BREIT = 12, DICKE = 0.5, WAND_H = 0.5, RAND = 0.8, OBEN = 0.05;
 const fest = welt.createRigidBody(RAPIER.RigidBodyDesc.fixed());
 const fuehrungNach = new Map();  // Looping: Collider → Mittellinie (Spurführung)
 const marken = [];               // Start, Kontrollpunkte, Ziel (werden in Schritt 4 zu Regeln)
@@ -247,13 +251,14 @@ const TEILE = {
     const r = RASTER * felder, sg = seiteVon(richtung);
     return {
       pfad: s => { const a = s * Math.PI / 2; return [sg * (r - r * Math.cos(a)), 0, r * Math.sin(a)]; },
-      neigung: neigung ? s => sg * neigung * Math.sin(Math.PI * s) : null,
-      ende: [sg * r, 0, r, sg * Math.PI / 2], stuecke: 12 * felder,
+      // sin² statt sin: Neigung und Anhebung beginnen und enden ganz sanft – kein Knick am Übergang
+      neigung: neigung ? s => sg * neigung * Math.sin(Math.PI * s) ** 2 : null,
+      ende: [sg * r, 0, r, sg * Math.PI / 2], stuecke: 24 * felder,
     };
   },
   kurveKurz:  richtung => TEILE.kurve(richtung, 1),          // Radius 20 m
   kurveLang:  richtung => TEILE.kurve(richtung, 2),          // Radius 40 m
-  steilkurve: richtung => TEILE.kurve(richtung, 2, 0.6),     // Radius 40 m, bis 34° nach innen geneigt
+  steilkurve: richtung => ({ ...TEILE.kurve(richtung, 2, 0.6), kleben: true }), // Radius 40 m, bis 34° geneigt
   sKurve: richtung => {                                      // versetzt die Fahrbahn um ein Feld zur Seite
     const sg = seiteVon(richtung);
     return { pfad: s => [sg * RASTER * (1 - Math.cos(Math.PI * s)) / 2, 0, 3 * RASTER * s],
@@ -311,19 +316,23 @@ function baueTeil(t, start, yaw) {
   const N = t.stuecke, w = (t.breite || BREIT) / 2;
   // 1) Mittellinie abtasten: Punkt, Fahrtrichtung, "oben" (Fahrbahn-Normale) und Seite
   const pkt = [];
+  // Punkt der Mittellinie; bei Neigung wird sie angehoben, damit die Innenkante auf Bodenhöhe bleibt
+  const punktBei = s => {
+    const p = rotY(t.pfad(s), yaw).add(start);
+    p.y += OBEN + (t.neigung ? w * Math.abs(Math.sin(t.neigung(s))) : 0);
+    return p;
+  };
   for (let i = 0; i <= N; i++) {
     const s = i / N, s0 = Math.max(0, s - 1e-3), s1 = Math.min(1, s + 1e-3);
-    const tan = rotY(t.pfad(s1), yaw).sub(rotY(t.pfad(s0), yaw)).normalize();
+    const tan = punktBei(s1).sub(punktBei(s0)).normalize();   // echte Fahrtrichtung inkl. Anstieg
     const n = t.oben ? rotY(t.oben(s), yaw) : V(0, 1, 0);
     n.addScaledVector(tan, -n.dot(tan)).normalize();
     let r = V().crossVectors(n, tan).normalize();
-    const p = rotY(t.pfad(s), yaw).add(start);
-    p.y += OBEN;
+    const p = punktBei(s);
     const b = t.neigung ? t.neigung(s) : 0;
     if (b) {
       n.multiplyScalar(Math.cos(b)).addScaledVector(r, Math.sin(b)).normalize();
       r = V().crossVectors(n, tan).normalize();
-      p.y += w * Math.abs(Math.sin(b));      // Innenkante bleibt auf Bodenhöhe
     }
     pkt.push({ p, n, r, tan, teil: t.name });
   }
@@ -361,8 +370,9 @@ function baueTeil(t, start, yaw) {
   for (const q of [pkt[0], pkt[N]]) { const A = oberseite(q), U = unterseite(q); strasse.viereck(A[0], A[3], U[1], U[0], F.seite); }
   const fahrbahn = strasse.fertig(false);
   wand.fertig(true);
+  if (t.kleben) fuehrungNach.set(fahrbahn.handle, { pkt, art: 'kleben' });
   if (t.fuehrung) {
-    fuehrungNach.set(fahrbahn.handle, pkt);
+    fuehrungNach.set(fahrbahn.handle, { pkt, art: 'looping' });
     // Die Karosserie stößt nicht an die Looping-Fahrbahn – dort tragen nur die Räder (und die Spurführung)
     fahrbahn.setCollisionGroups(GRUPPE_LOOPING);
   }
@@ -576,29 +586,56 @@ let fuehrung = null;   // Mittellinie des Loopings, wenn das Auto gerade darin f
 // Die Bewegung in die Fahrbahn hinein wird umgelenkt (wie die Kraft der Bahn auf das Auto).
 // Bewegt sich das Auto von der Bahn weg (oben zu langsam), greift nichts – es fällt herunter.
 const fMat = new THREE.Matrix4(), fQuat = new THREE.Quaternion(), fFehler = new THREE.Quaternion();
-function spurfuehrung(pkt, dt) {
+// Zwei Arten:
+//  'looping' – Lage und Richtung kommen ganz von der Bahn (das Auto wird durch den Looping geführt).
+//  'kleben'  – Steilkurve: das Auto wird an die Fahrbahn gedrückt und kippt weich mit ihr mit,
+//              lenken tut weiter der Spieler. So hüpft es nicht über die Kanten der Kurve.
+// Rückgabe: true = aktiv, 'ende' = Teil zu Ende gefahren, false = vom Teil gelöst.
+function spurfuehrung(f, dt) {
+  const pkt = f.pkt, L = pkt.length;
   let bi = 0, bd = Infinity;
-  for (let i = 0; i < pkt.length; i++) { const d = pkt[i].p.distanceToSquared(pos); if (d < bd) { bd = d; bi = i; } }
-  const q = pkt[bi], nach = pkt[Math.min(pkt.length - 1, bi + 1)], vor = pkt[Math.max(0, bi - 1)];
-  const abstand = pos.clone().sub(q.p).dot(q.n);              // Höhe über der Fahrbahn
+  for (let i = 0; i < L; i++) { const d = pkt[i].p.distanceToSquared(pos); if (d < bd) { bd = d; bi = i; } }
+  // zwischen den beiden nächsten Messpunkten weich überblenden (keine Kanten)
+  const a = pkt[bi];
+  const b = bi === L - 1 ? pkt[bi - 1] : bi === 0 ? pkt[1]
+          : pkt[bi + 1].p.distanceToSquared(pos) < pkt[bi - 1].p.distanceToSquared(pos) ? pkt[bi + 1] : pkt[bi - 1];
+  const seg = b.p.clone().sub(a.p);
+  const u = Math.max(0, Math.min(1, pos.clone().sub(a.p).dot(seg) / Math.max(1e-6, seg.lengthSq())));
+  if (bi === L - 1 || (bi === L - 2 && b === pkt[L - 1] && u > 0.6)) return 'ende';
+  const n = a.n.clone().lerp(b.n, u).normalize(), mitte = a.p.clone().lerp(b.p, u);
+  const tan = a.tan.clone().lerp(b.tan, u).normalize(), rr = a.r.clone().lerp(b.r, u).normalize();
+  const abstand = pos.clone().sub(mitte).dot(n);              // Höhe über der Fahrbahn
   if (abstand < -1 || abstand > 2.5) return false;            // schon abgefallen
-  const hinein = lin.dot(q.n);
-  if (hinein < 0) lin.addScaledVector(q.n, -hinein);
-  if (abstand > 1.2 && hinein > 0) return false;              // löst sich gerade
   const ruhe = P.FEDER_LAENGE + P.RAD_RADIUS - P.FEDER_RUHE;  // richtige Höhe über der Fahrbahn
-  if (abstand < ruhe) lin.addScaledVector(q.n, (ruhe - abstand) * 10);
-  // Soll-Lage: Fahrtrichtung entlang der Bahn, leicht zur Mitte hin
-  const abweichung = pos.clone().sub(q.p).dot(q.r);
-  const richtung = q.tan.clone().addScaledVector(q.r, -abweichung * 0.06).normalize();
-  const seiteSoll = V().crossVectors(q.n, richtung).normalize();
+  const hinein = lin.dot(n);
+  if (f.art === 'kleben') {
+    lin.addScaledVector(n, -hinein + (ruhe - abstand) * 20);  // an die Fahrbahn drücken
+  } else {
+    if (hinein < 0) lin.addScaledVector(n, -hinein);
+    if (abstand > 1.2 && hinein > 0) return false;            // löst sich gerade (oben zu langsam)
+    if (abstand < ruhe) lin.addScaledVector(n, (ruhe - abstand) * 10);
+  }
+  const vor = pkt[Math.max(0, bi - 1)], nach = pkt[Math.min(L - 1, bi + 1)];
+  const ds = nach.p.distanceTo(vor.p) || 1, tempo = lin.dot(tan);
+  if (f.art === 'kleben') {
+    // nur Neigen (Rollen/Nicken) kommt von der Bahn – um die Hochachse dreht weiter der Spieler
+    const neigen = V().crossVectors(vor.n, nach.n).multiplyScalar(tempo / ds).add(V().crossVectors(oben, n).multiplyScalar(15));
+    neigen.addScaledVector(oben, -neigen.dot(oben));
+    const gier = ang.dot(oben);                                // Lenkung des Spielers merken …
+    ang.set(0, 0, 0).addScaledVector(oben, gier).add(neigen);  // … und mit dem Neigen kombinieren
+    return true;
+  }
+  // Looping: Soll-Lage = Fahrtrichtung entlang der Bahn, leicht zur Mitte hin
+  const abweichung = pos.clone().sub(mitte).dot(rr);
+  const richtung = tan.clone().addScaledVector(rr, -abweichung * 0.06).normalize();
+  const seiteSoll = V().crossVectors(n, richtung).normalize();
   const obenSoll = V().crossVectors(richtung, seiteSoll);
   fQuat.setFromRotationMatrix(fMat.makeBasis(seiteSoll, obenSoll, richtung));
   fFehler.copy(fQuat).multiply(quat.clone().invert());
   if (fFehler.w < 0) { fFehler.x *= -1; fFehler.y *= -1; fFehler.z *= -1; fFehler.w *= -1; }
   const winkel = 2 * Math.acos(Math.min(1, fFehler.w)), s = Math.sqrt(Math.max(1e-9, 1 - fFehler.w * fFehler.w));
   // Drehung, die die Bahn an dieser Stelle selbst macht (vorausschauend), plus Korrektur der Abweichung
-  const ds = nach.p.distanceTo(vor.p) || 1;
-  const bahnDreh = V().crossVectors(vor.tan, nach.tan).multiplyScalar(lin.dot(q.tan) / ds);
+  const bahnDreh = V().crossVectors(vor.tan, nach.tan).multiplyScalar(tempo / ds);
   ang.copy(bahnDreh).add(V(fFehler.x / s, fFehler.y / s, fFehler.z / s).multiplyScalar(winkel * 15));
   return true;
 }
@@ -634,7 +671,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   lin.set(lv.x, lv.y, lv.z); ang.set(av.x, av.y, av.z);
 
   // 1) Vier Federn: Strahl von jedem Aufhängepunkt nach unten
-  let kontakte = 0;
+  let kontakte = 0, radAufWand = false;
   normale.set(0, 0, 0);
   fuehrung = null;
   linVorher.copy(lin);   // Geschwindigkeit, bevor die Federn drücken
@@ -654,6 +691,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     normale.x += treffer.normal.x; normale.y += treffer.normal.y; normale.z += treffer.normal.z;
     const h = treffer.collider ? treffer.collider.handle : treffer.colliderHandle;
     if (fuehrungNach.has(h)) fuehrung = fuehrungNach.get(h);
+    if (wandNach.has(h)) radAufWand = true;      // Rad fährt gerade über eine Leitplanke
     hebel.subVectors(punkt, pos);
     vPunkt.crossVectors(ang, hebel).add(lin);
     const kraft = Math.max(0, FEDER_K * einfederung - FEDER_C * vPunkt.dot(oben));
@@ -687,7 +725,13 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     const vs = lin.dot(seite);
     lin.addScaledVector(seite, -vs * (1 - Math.exp(-P.GRIP * dt)) * g);
     const dMax = P.DREH_MAX * Math.PI / 180;
-    let zielDreh = Math.max(-dMax, Math.min(dMax, (vf / 3.6) * Math.tan(zustand.lenk) / P.RADSTAND));
+    // In der Steilkurve drückt die Neigung das Auto in die Kurve: es kann dort enger und schneller lenken
+    const fb = fuehrung || (zustand.fuehrungZeit > 0 ? zustand.fuehrungBahn : null);
+    const kurvenGrip = fb && fb.art === 'kleben' ? P.STEILKURVE_GRIP : 1;
+    let zielDreh = Math.max(-dMax * kurvenGrip, Math.min(dMax * kurvenGrip, kurvenGrip * (vf / 3.6) * Math.tan(zustand.lenk) / P.RADSTAND));
+    // An der Wand fast stehend: Lenken dreht das Auto trotzdem, damit man sich ohne Rückwärtsgang befreien kann
+    const lenkRichtung = (links ? 1 : 0) - (rechts ? 1 : 0);
+    if (zustand.wandVorher && Math.abs(vf) < 20 && lenkRichtung) zielDreh = lenkRichtung * P.WAND_DREHEN;
     const a = zustand.ausrichten;   // nach Streifen an der Wand: kurz parallel zur Wand drehen
     if (a && a.zeit > 0) { zielDreh = a.rate; a.zeit -= dt; }
     ang.addScaledVector(oben, (zielDreh - ang.dot(oben)) * g);
@@ -706,10 +750,22 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
       if (w > 0) ang.multiplyScalar(Math.max(0, w - P.LUFTBREMSE * dt) / w);
     }
   }
-  // Looping: Spurführung bleibt kurz aktiv, auch wenn die Räder einen Moment den Kontakt verlieren
+  // Spurführung (Looping, Steilkurve) bleibt kurz aktiv, wenn die Räder einen Moment den Kontakt verlieren –
+  // aber nicht, wenn das Auto schon auf einem anderen Teil steht.
+  const warGefuehrt = zustand.fuehrungZeit > 0;
   if (fuehrung) { zustand.fuehrungBahn = fuehrung; zustand.fuehrungZeit = 0.3; }
+  else if (kontakte > 0) zustand.fuehrungZeit = 0;
   else zustand.fuehrungZeit = Math.max(0, (zustand.fuehrungZeit || 0) - dt);
-  if (zustand.fuehrungZeit > 0 && zustand.fuehrungBahn && !spurfuehrung(zustand.fuehrungBahn, dt)) zustand.fuehrungZeit = 0;
+  const ergebnis = zustand.fuehrungZeit > 0 && zustand.fuehrungBahn ? spurfuehrung(zustand.fuehrungBahn, dt) : false;
+  if (ergebnis !== true) {
+    zustand.fuehrungZeit = 0;
+    if (warGefuehrt && (ergebnis === 'ende' || kontakte > 0)) {
+      // sauber aussteigen: kein Nachdrehen der Nase, kein Hochfedern beim Übergang aufs nächste Teil
+      const gier = ang.dot(oben);
+      ang.set(0, 0, 0).addScaledVector(oben, gier);
+      const weg = lin.dot(oben); if (weg > 0) lin.addScaledVector(oben, -weg);
+    }
+  }
   autoKoerper.setLinvel(lin, true);
   autoKoerper.setAngvel(ang, true);
   linStep.copy(lin);     // Geschwindigkeit direkt vor dem Physik-Schritt (für die Wand-Regeln)
@@ -767,7 +823,15 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
       }
     }
   }
-  zustand.wandVorher = anWand;
+  // Über eine Leitplanke fahren: einmal kräftig abbremsen (Richtung bleibt)
+  if (radAufWand && zustand.wandPause === 0 && vf > 5) {
+    zustand.trefferZahl++; zustand.wandPause = 0.4;
+    const lv5 = autoKoerper.linvel(), h = oben.clone().multiplyScalar(lv5.x * oben.x + lv5.y * oben.y + lv5.z * oben.z);
+    const flach = V(lv5.x, lv5.y, lv5.z).sub(h).multiplyScalar(P.WAND_DRUEBER);
+    autoKoerper.setLinvel(flach.add(h), true);
+  }
+  if (radAufWand && zustand.wandPause > 0) zustand.wandPause = 0.4;
+  zustand.wandVorher = anWand || radAufWand;
 
   // Weltrand
   const p2 = autoKoerper.translation();
@@ -906,7 +970,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 // Zum Testen am PC (Konsole): Zugriff auf Auto und Werte
-window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken };
+window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken, saeulen };
 </script>
 <script>
   addEventListener('error', e => {
