@@ -105,9 +105,16 @@
   #pausiert {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
     flex-direction: column; gap: 12px; z-index: 5; cursor: pointer;
-    background: rgba(10, 20, 40, 0.5); color: #fff; font-size: 48px; font-weight: 800;
+    background: rgba(10, 20, 40, 0.88); color: #fff; font-size: 48px; font-weight: 800;
   }
   #pausiert small { font-size: 20px; font-weight: 400; }
+  #streckenwahl { margin-top: 24px; text-align: center; }
+  #streckenwahl .titel { font-size: 16px; font-weight: 400; opacity: 0.8; margin-bottom: 10px; letter-spacing: 0.06em; }
+  #streckenKnoepfe { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 720px; }
+  .streckeKnopf { min-width: 120px; padding: 10px 12px; border-radius: 12px; font-size: 16px; font-weight: 600;
+    background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.35); color: #fff; cursor: pointer; }
+  .streckeKnopf.aktiv { border-color: #ff8a1f; background: rgba(255,138,31,0.3); }
+  .streckeKnopf small { display: block; font-size: 12px; font-weight: 400; opacity: 0.8; }
   #laden {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: #13264a; color: #fff; font-size: 28px; font-weight: 700; z-index: 8;
@@ -165,10 +172,12 @@
 <div id="links"  class="knopf" data-halten="links">◀</div>
 <div id="rechts" class="knopf" data-halten="rechts">▶</div>
 
-<div id="hinweis">Fahr durch alle <b style="color:#22c3d6">türkisen Tore</b> und dann ins Ziel – die Uhr startet mit dem ersten Gas.<br>
+<div id="hinweis"><div id="hinweisName" style="font-size:24px;font-weight:800;color:#ffc35a"></div><div id="hinweisTipp" style="margin-bottom:6px"></div>Fahr durch alle <b style="color:#22c3d6">türkisen Tore</b> und dann ins Ziel – die Uhr startet mit dem ersten Gas.<br>
   <small>▲ Gas · ▼ Bremse/Rückwärts · ◀ ▶ Lenken · ▼ beim Lenken = Drift · Kante zwischen ▲ und ▼ = Gas + Bremse<br>
   ↺ 1× = zurück zum letzten Tor · ↺ 2× schnell = Neustart<br>Am PC: W A S D / Pfeiltasten, R = letztes Tor, T = Neustart</small></div>
-<div id="pausiert">Pause<small>Irgendwo tippen zum Weiterfahren</small></div>
+<div id="pausiert">Pause<small>Irgendwo tippen zum Weiterfahren</small>
+  <div id="streckenwahl"><div class="titel">Strecke wählen</div><div id="streckenKnoepfe"></div></div>
+</div>
 <div id="laden">Lädt …</div>
 <div id="quer">Bitte das iPad quer halten 🔄</div>
 <div id="fehler"></div>
@@ -315,18 +324,22 @@ const TEILE = {
   start:         () => ({ ...TEILE.gerade(1), marke: 'start' }),
   kontrollpunkt: () => ({ ...TEILE.gerade(1), marke: 'kontrollpunkt' }),
   ziel:          () => ({ ...TEILE.gerade(1), marke: 'ziel' }),
-  kurve: (richtung, felder = 1, neigung = 0) => {
-    const r = RASTER * felder, sg = seiteVon(richtung);
+  // Kurve: Radius = felder × 20 m, Winkel = viertel × 90°
+  kurve: (richtung, felder = 1, neigung = 0, viertel = 1) => {
+    const r = RASTER * felder, sg = seiteVon(richtung), A = viertel * Math.PI / 2;
     return {
-      pfad: s => { const a = s * Math.PI / 2; return [sg * (r - r * Math.cos(a)), 0, r * Math.sin(a)]; },
+      pfad: s => { const a = s * A; return [sg * (r - r * Math.cos(a)), 0, r * Math.sin(a)]; },
       // sin² statt sin: Neigung und Anhebung beginnen und enden ganz sanft – kein Knick am Übergang
       neigung: neigung ? s => sg * neigung * Math.sin(Math.PI * s) ** 2 : null,
-      ende: [sg * r, 0, r, sg * Math.PI / 2], stuecke: 24 * felder,
+      ende: [sg * (r - r * Math.cos(A)), 0, r * Math.sin(A), sg * A], stuecke: Math.ceil(24 * felder * viertel),
     };
   },
   kurveKurz:  richtung => TEILE.kurve(richtung, 1),          // Radius 20 m
   kurveLang:  richtung => TEILE.kurve(richtung, 2),          // Radius 40 m
-  steilkurve: richtung => ({ ...TEILE.kurve(richtung, 2, 0.6), kleben: true }), // Radius 40 m, bis 34° geneigt
+  kurveWeit:  (richtung, felder = 5) => TEILE.kurve(richtung, felder),   // Radius 100 m – für hohes Tempo
+  hochkurve:  richtung => ({ ...TEILE.kurve(richtung, 2), waende: false }), // erhöhte Kurve ohne Leitplanken
+  steilkurve: (richtung, felder = 2) => ({ ...TEILE.kurve(richtung, felder, 0.6), kleben: true }), // bis 34° geneigt
+  kehre:      richtung => TEILE.kurve(richtung, 1, 0, 2),    // Haarnadel: 180° mit Radius 20 m
   sKurve: richtung => {                                      // versetzt die Fahrbahn um ein Feld zur Seite
     const sg = seiteVon(richtung);
     return { pfad: s => [sg * RASTER * (1 - Math.cos(Math.PI * s)) / 2, 0, 3 * RASTER * s],
@@ -338,7 +351,8 @@ const TEILE = {
                                ende: [0, -STUFE * stufen, 2 * RASTER, 0], stuecke: 16 }),
   rampe: (hoehe = 3) => ({ pfad: s => [0, hoehe * s, RASTER * s], ende: [0, 0, RASTER, 0], stuecke: 2,
                            waende: false, fuellen: true }),
-  luecke: (n = 1) => ({ ende: [0, 0, RASTER * n, 0] }),     // nichts – zum Drüberspringen
+  // nichts – zum Drüberspringen; stufen < 0: die Landung liegt tiefer
+  luecke: (n = 1, stufen = 0) => ({ ende: [0, STUFE * stufen, RASTER * n, 0] }),
   looping: (richtung = 'links', radius = 12) => {           // Ausfahrt 14 m seitlich versetzt
     const sg = seiteVon(richtung), versatz = 14;
     return {
@@ -452,8 +466,9 @@ function baueTeil(t, start, yaw) {
   for (let i = 1; i <= N; i++) {
     weg += pkt[i].p.distanceTo(pkt[i - 1].p);
     const q = pkt[i];
-    if (weg >= 12 && !t.saeulenlos && q.n.y > 0.8 && q.p.y - DICKE > 1.5 && !t.fuellen) {
-      saeulen.push(V(q.p.x, q.p.y - DICKE, q.p.z)); weg = 0;
+    const unten = t.fuellen ? start.y - DICKE + OBEN : q.p.y - DICKE;   // gefüllte Rampe: Unterkante
+    if (weg >= 12 && !t.saeulenlos && q.n.y > 0.8 && unten > 1.5) {
+      saeulen.push(V(q.p.x, unten, q.p.z)); weg = 0;
     }
   }
   // 5) Tor und Linie für Start, Kontrollpunkt, Ziel
@@ -503,16 +518,91 @@ function baueStrecke(liste) {
   sm.count = saeulen.length; sm.castShadow = true; scene.add(sm);
 }
 
-// ---------- Teile-Parcours: jedes Bauteil kommt mindestens einmal vor ----------
-const PARCOURS = [
-  ['start'], ['gerade', 2], ['kurveKurz', 'rechts'], ['gerade'],
-  ['steigung'], ['hochbahn', 2], ['gefaelle'],
-  ['kurveLang', 'links'], ['sKurve', 'rechts'], ['kontrollpunkt'], ['gerade', 2],
-  ['steilkurve', 'rechts'], ['gerade'], ['steilkurve', 'rechts'], ['gerade', 2],
-  ['rampe'], ['luecke', 2], ['gerade', 2], ['breit', 2],
-  ['looping', 'links'], ['gerade'], ['kurveKurz', 'rechts'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 4], ['ziel'],
+// Planer: rechnet nur die Mittellinie einer Strecke aus (ohne zu bauen) – zum Prüfen auf Überschneidungen
+function streckenPlan(liste) {
+  const punkte = [], pos = V(0, 0, 0); let yaw = 0;
+  liste.forEach(([name, ...werte], teilNr) => {
+    const t = TEILE[name](...werte);
+    if (t.pfad) {
+      const n = Math.max(2, Math.ceil(t.stuecke / 2));
+      for (let i = 0; i <= n; i++) {
+        const p = rotY(t.pfad(i / n), yaw).add(pos);
+        punkte.push({ p, teilNr, name, breite: t.breite || BREIT, looping: !!t.fuehrung });
+      }
+    }
+    const [x, y, z, dreh] = t.ende;
+    pos.add(rotY([x, y, z], yaw)); yaw += dreh;
+  });
+  return punkte;
+}
+
+// =====================================================================
+//  DIE STRECKEN (Schritt 5) – jede ist eine Liste von Bauteilen.
+//  Wahl über die Adresse: …/blitzbahn/?strecke=3 (oder im Pause-Bildschirm).
+// =====================================================================
+const STRECKEN = [
+  { nr: 0, name: 'Teile-Parcours', tipp: 'Alle Bauteile hintereinander – zum Ausprobieren.',
+    teile: [
+      ['start'], ['gerade', 2], ['kurveKurz', 'rechts'], ['gerade'],
+      ['steigung'], ['hochbahn', 2], ['gefaelle'],
+      ['kurveLang', 'links'], ['sKurve', 'rechts'], ['kontrollpunkt'], ['gerade', 2],
+      ['steilkurve', 'rechts'], ['gerade'], ['steilkurve', 'rechts'], ['gerade', 2],
+      ['rampe'], ['luecke', 2], ['gerade', 2], ['breit', 2],
+      ['looping', 'links'], ['gerade'], ['kurveKurz', 'rechts'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 4], ['ziel'],
+    ] },
+  { nr: 1, name: 'Warm-up', tipp: 'Einfach Gas geben und die Kurven sauber nehmen. ↺ 1× bringt dich zum letzten Tor.',
+    teile: [['start'], ['gerade', 4], ['kurveLang', 'rechts'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 3],
+            ['kurveLang', 'rechts'], ['gerade', 2], ['kurveLang', 'links'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 4], ['ziel']] },
+  { nr: 2, name: 'Schikane', tipp: 'Vor engen Kurven kurz bremsen – oder ▼ beim Lenken für ein engeres Einlenken.',
+    teile: [['start'], ['gerade', 3], ['sKurve', 'links'], ['sKurve', 'rechts'], ['kontrollpunkt'], ['gerade', 2],
+            ['kurveKurz', 'rechts'], ['kurveKurz', 'links'], ['gerade', 2], ['sKurve', 'rechts'], ['sKurve', 'links'], ['kontrollpunkt'],
+            ['gerade', 3], ['kurveKurz', 'links'], ['gerade'], ['kurveKurz', 'rechts'], ['sKurve', 'links'], ['kontrollpunkt'], ['gerade', 3], ['ziel']] },
+  { nr: 3, name: 'Hügel', tipp: 'Auf den Kuppen hebt das Auto ab – schnell, aber gerade bleiben!',
+    teile: [['start'], ['gerade', 2], ['steigung'], ['gefaelle'], ['gerade', 2], ['steigung', 2], ['gefaelle', 2], ['kontrollpunkt'],
+            ['kurveLang', 'links'], ['gerade'], ['steigung'], ['gerade', 2], ['gefaelle'], ['kontrollpunkt'], ['gerade'],
+            ['steigung'], ['gefaelle'], ['steigung'], ['gefaelle'], ['kurveLang', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
+  { nr: 4, name: 'Absprung', tipp: 'Mit Schwung über die Lücken. In der Luft ▼ = Luftbremse, damit du gerade landest.',
+    teile: [['start'], ['gerade', 3], ['rampe'], ['luecke', 2], ['gerade', 2], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade', 2],
+            ['steigung', 2], ['hochbahn'], ['rampe'], ['luecke', 3, -2], ['gerade', 3], ['kontrollpunkt'], ['kurveLang', 'rechts'],
+            ['gerade', 2], ['rampe', 4], ['luecke', 3], ['gerade', 2], ['kurveLang', 'rechts'], ['gerade', 2], ['rampe', 2],
+            ['luecke', 2], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
+  { nr: 5, name: 'Steilkurve', tipp: 'In den geneigten Kurven kannst du viel schneller fahren als in flachen.',
+    teile: [['start'], ['gerade', 4], ['steilkurve', 'rechts'], ['gerade', 3], ['steilkurve', 'rechts'], ['kontrollpunkt'], ['gerade', 2],
+            ['steilkurve', 'links', 3], ['gerade', 3], ['kontrollpunkt'], ['steilkurve', 'links'], ['gerade', 2], ['steilkurve', 'rechts'],
+            ['gerade', 3], ['steilkurve', 'rechts', 3], ['gerade', 4], ['steilkurve', 'links'], ['gerade', 3], ['steilkurve', 'links'],
+            ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
+  { nr: 6, name: 'Hochbahn', tipp: 'Keine Leitplanken hier oben – wer runterfällt, tippt ↺.',
+    teile: [['start'], ['gerade', 2], ['steigung', 2], ['hochbahn', 3], ['kontrollpunkt'], ['hochkurve', 'links'], ['hochbahn', 2],
+            ['hochkurve', 'rechts'], ['hochbahn', 2], ['kontrollpunkt'], ['hochbahn', 2], ['hochkurve', 'rechts'], ['hochbahn', 3],
+            ['hochkurve', 'rechts'], ['hochbahn', 2], ['hochkurve', 'links'], ['hochbahn', 2], ['kontrollpunkt'], ['gefaelle', 2], ['gerade', 2], ['kurveLang', 'links'], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
+  { nr: 7, name: 'Looping', tipp: 'Mit Vollgas in den Looping – mindestens etwa 110 km/h.',
+    teile: [['start'], ['gerade', 4], ['kontrollpunkt'], ['gerade', 2], ['breit', 2], ['looping', 'links'], ['gerade', 2],
+            ['kurveLang', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['gerade', 3], ['kurveLang', 'rechts'], ['gerade', 3], ['breit', 2],
+            ['looping', 'rechts'], ['gerade'], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade', 3], ['sKurve', 'rechts'], ['gerade', 2],
+            ['kurveLang', 'links'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
+  { nr: 8, name: 'Vollgas', tipp: 'Über 400 km/h auf den Geraden – vor den weiten Kurven etwas Tempo rausnehmen.',
+    teile: [['start'], ['gerade', 24], ['kontrollpunkt'], ['gerade', 10], ['kurveWeit', 'rechts'], ['gerade', 10], ['kontrollpunkt'],
+            ['gerade', 5], ['steilkurve', 'rechts', 4], ['gerade', 14], ['kontrollpunkt'], ['gerade', 8], ['kurveWeit', 'links'],
+            ['gerade', 10], ['kontrollpunkt'], ['gerade', 6], ['ziel']] },
+  { nr: 9, name: 'Kehren', tipp: 'Enge Haarnadeln: bremsen und dabei lenken (Drift) zieht dich herum.',
+    teile: [['start'], ['gerade', 2], ['kehre', 'rechts'], ['gerade', 3], ['kehre', 'links'], ['gerade'], ['kontrollpunkt'], ['gerade'],
+            ['kehre', 'rechts'], ['gerade', 3], ['kehre', 'links'], ['gerade'], ['kontrollpunkt'], ['gerade'], ['sKurve', 'links'],
+            ['gerade'], ['kontrollpunkt'], ['gerade'], ['kehre', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2],
+            ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
+  { nr: 10, name: 'Finale', tipp: 'Alles zusammen: Sprung, Looping, Kehre, Hochbahn, Steilkurven – viel Glück!',
+    teile: [['start'], ['gerade', 4], ['sKurve', 'links'], ['kontrollpunkt'], ['steilkurve', 'rechts'], ['gerade', 2], ['rampe'], ['luecke', 2],
+            ['gerade', 2], ['kontrollpunkt'], ['kurveLang', 'links'], ['breit', 3], ['looping', 'rechts'], ['gerade', 2], ['kontrollpunkt'],
+            ['kehre', 'rechts'], ['gerade', 3], ['steigung', 2], ['hochbahn', 2], ['hochkurve', 'links'], ['hochbahn', 2], ['kontrollpunkt'],
+            ['gefaelle', 2], ['steilkurve', 'links'], ['gerade', 4], ['kontrollpunkt'], ['kurveKurz', 'rechts'], ['steigung'], ['gefaelle'],
+            ['gerade', 3], ['kurveLang', 'rechts'], ['gerade', 4], ['steilkurve', 'rechts'], ['gerade', 3], ['sKurve', 'links'],
+            ['gerade', 2], ['kontrollpunkt'], ['gerade', 3], ['ziel']] },
 ];
-baueStrecke(PARCOURS);
+const streckenWahl = (() => {
+  let nr = 1;
+  try { const q = new URLSearchParams(location.search).get('strecke'); if (q !== null) nr = parseInt(q, 10); } catch {}
+  return STRECKEN.find(s => s.nr === nr) || STRECKEN.find(s => s.nr === 1) || STRECKEN[0];
+})();
+baueStrecke(streckenWahl.teile);
 const startMarke = marken.find(m => m.typ === 'start');
 const START = { x: startMarke.pos.x, y: startMarke.pos.y + P.FEDER_LAENGE + P.RAD_RADIUS - P.FEDER_RUHE + 0.01, z: startMarke.pos.z };
 const START_YAW = Math.atan2(startMarke.tan.x, startMarke.tan.z);
@@ -526,10 +616,16 @@ const stamm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.4, 0.5, 3, 5)
 const krone = new THREE.InstancedMesh(new THREE.ConeGeometry(2.6, 7, 6),
   new THREE.MeshLambertMaterial({ color: 0x2f7a3a, flatShading: true }), 400);
 const m = new THREE.Matrix4();
+const baumRaster = new Set(bahnPunkte.map(b => `${Math.round(b.p.x / 30)},${Math.round(b.p.z / 30)}`));
+function baumZuNah(x, z) {
+  const gx = Math.round(x / 30), gz = Math.round(z / 30);
+  for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (baumRaster.has(`${gx + a},${gz + b}`)) return true;
+  return false;
+}
 for (let i = 0; i < 400; i++) {
   let x, z;
   do { x = (zufall() - 0.5) * 3600; z = (zufall() - 0.5) * 3600; }
-  while (x > -400 && x < 60 && z > -60 && z < 340);   // keine Bäume auf dem Parcours
+  while (baumZuNah(x, z));                              // keine Bäume auf oder direkt neben der Strecke
   const s = 0.7 + zufall() * 0.8;
   m.makeScale(s, s, s).setPosition(x, 1.5 * s, z); stamm.setMatrixAt(i, m);
   m.makeScale(s, s, s).setPosition(x, 6 * s, z); krone.setMatrixAt(i, m);
@@ -675,7 +771,7 @@ function zuruecksetzen() {
 //  Uhr in Millisekunden, startet mit dem ersten Gas oder Bremsen.
 //  Zurücksetzen: 1× = zum letzten Tor (Uhr läuft weiter), 2× = Neustart.
 // =====================================================================
-const STRECKEN_NAME = 'Teile-Parcours';
+const STRECKEN_NAME = streckenWahl.nr ? `${streckenWahl.nr} · ${streckenWahl.name}` : streckenWahl.name;
 const tore = marken.filter(m => m.typ === 'kontrollpunkt');
 const zielMarke = marken.find(m => m.typ === 'ziel');
 const rennen = { naechstesTor: 0, torZeiten: [], fertig: false, endzeit: 0, letztesTor: null, meldungBis: 0 };
@@ -690,6 +786,24 @@ function bestzeitSpeichern(zeit, torZeiten) {
   try { localStorage.setItem(SPEICHER, JSON.stringify({ zeit, torZeiten, datum: Date.now() })); } catch { /* privat: dann eben nicht */ }
 }
 let bestzeit = bestzeitLaden();
+
+// Start-Hinweis mit Streckenname und Tipp
+document.getElementById('hinweisName').textContent = STRECKEN_NAME;
+document.getElementById('hinweisTipp').textContent = streckenWahl.tipp || '';
+
+// Streckenwahl im Pause-Bildschirm (vorläufig – das richtige Menü kommt in Schritt 6)
+function streckeLaden(nr) {
+  try { const u = new URL(location.href); u.searchParams.set('strecke', nr); location.href = u.toString(); }
+  catch { location.search = '?strecke=' + nr; }
+}
+for (const s of STRECKEN.filter(s => s.nr > 0).concat(STRECKEN.filter(s => s.nr === 0))) {
+  const b = document.createElement('button');
+  b.className = 'streckeKnopf' + (s === streckenWahl ? ' aktiv' : '');
+  let bz = null; try { const d = JSON.parse(localStorage.getItem('blitzbahn.bestzeit.' + (s.nr ? `${s.nr} · ${s.name}` : s.name))); bz = d && d.zeit; } catch {}
+  b.innerHTML = `${s.nr ? s.nr + ' · ' : ''}${s.name}<small>${bz ? 'Bestzeit ' + zeitText(bz) : 'noch keine Zeit'}</small>`;
+  b.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); streckeLaden(s.nr); });
+  document.getElementById('streckenKnoepfe').appendChild(b);
+}
 
 function torFaerben(m, geschafft) {
   if (m.tor) m.tor.material.color.set(geschafft ? 0x7dffa0 : 0xffffff);   // eingesammelt = grünlich
@@ -796,6 +910,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyT' || e.code === 'Backspace') zuruecksetzen();   // T = Neustart
   if (e.code === 'KeyP' || e.code === 'Space') pauseUmschalten();
   if (e.code === 'KeyC') kameraUmschalten();
+  if (zustand.pause && /^Digit\d$/.test(e.code)) { const d = +e.code.slice(5); streckeLaden(d === 0 ? 10 : d); }
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
 });
 addEventListener('keyup', e => tasten.delete(e.code));
@@ -1298,7 +1413,7 @@ addEventListener('resize', () => {
 });
 // Zum Testen am PC (Konsole): Zugriff auf Auto und Werte
 window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken, saeulen, welt, RAEDER, wandNach,
-                 rennen, tore, zumLetztenTor, resetGetippt, get bestzeit() { return bestzeit; },
+                 rennen, tore, zumLetztenTor, resetGetippt, streckenPlan, STRECKEN, streckenWahl, get bestzeit() { return bestzeit; },
                  bestzeitLoeschen() { try { localStorage.removeItem(SPEICHER); } catch {} bestzeit = null; } };
 </script>
 <script>
