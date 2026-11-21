@@ -164,7 +164,9 @@ const P = {
   WAND_STREIF: 0.42,      // streifender Wandtreffer: Tempo × 0,42 (110 → 46 km/h)
   WAND_RUECKPRALL: 0.11,  // frontaler Treffer: 251 → −27 km/h
   WAND_DREHEN: 1.2,       // rad/s – so schnell dreht man sich an der Wand im Stand weg
-  WAND_DRUEBER: 0.42,     // über eine Leitplanke fahren: Tempo × 0,42 (wie streifender Treffer)
+  WAND_DRUEBER: 0.3,      // steil über eine Leitplanke fahren: Tempo × 0,3
+  KANTE_WINKEL: 25,       // ° – flacher angefahren lenkt die Leitplanke zurück auf die Bahn
+  KANTE_ABPRALL: 0.85,    // … und das kostet nur wenig Tempo (× 0,85)
   // Technik
   SCHRITT: 1 / 240,       // Physik-Schritt (240 pro Sekunde)
   WELT_RAND: 1900,        // m vom Start: dort ist die Welt zu Ende
@@ -231,6 +233,7 @@ welt.createCollider(RAPIER.ColliderDesc.cuboid(BODEN / 2, 1, BODEN / 2).setFrict
 const RASTER = 20, STUFE = 5, BREIT = 12, DICKE = 0.5, WAND_H = 0.5, RAND = 0.8, OBEN = 0.05;
 const fest = welt.createRigidBody(RAPIER.RigidBodyDesc.fixed());
 const fuehrungNach = new Map();  // Looping: Collider → Mittellinie (Spurführung)
+const wandBahn = new Map();      // Leitplanke → Mittellinie ihres Teils
 const marken = [];               // Start, Kontrollpunkte, Ziel (werden in Schritt 4 zu Regeln)
 const saeulen = [];              // Stützen unter erhöhten Teilen
 const bahnPunkte = [];           // Mittellinie der ganzen Strecke (für Tests)
@@ -369,7 +372,8 @@ function baueTeil(t, start, yaw) {
   // Stirnseiten (sichtbar z. B. am Rampenende)
   for (const q of [pkt[0], pkt[N]]) { const A = oberseite(q), U = unterseite(q); strasse.viereck(A[0], A[3], U[1], U[0], F.seite); }
   const fahrbahn = strasse.fertig(false);
-  wand.fertig(true);
+  const wandC = wand.fertig(true);
+  if (wandC) wandBahn.set(wandC.handle, pkt);      // damit die Bordstein-Regel weiß, wie die Bahn dort verläuft
   if (t.kleben) fuehrungNach.set(fahrbahn.handle, { pkt, art: 'kleben' });
   if (t.fuehrung) {
     fuehrungNach.set(fahrbahn.handle, { pkt, art: 'looping' });
@@ -491,10 +495,10 @@ const ruecklichter = [-0.6, 0.6].map(x => {
 });
 const radGeo = new THREE.CylinderGeometry(P.RAD_RADIUS, P.RAD_RADIUS, 0.35, 10); radGeo.rotateZ(Math.PI / 2);
 const radMat = new THREE.MeshLambertMaterial({ color: 0x1b1b1b, flatShading: true });
-// Federpunkte liegen innerhalb der Karosserie (x ±0,75), die Räder werden außen gezeichnet (x ±0,95)
-const RAEDER = [[-0.75, 1.3, true], [0.75, 1.3, true], [-0.75, -1.3, false], [0.75, -1.3, false]]
+// Federpunkte liegen knapp innerhalb der Karosserie (x ±0,88), die Räder werden direkt daneben gezeichnet (x ±0,95)
+const RAEDER = [[-0.88, 1.3, true], [0.88, 1.3, true], [-0.88, -1.3, false], [0.88, -1.3, false]]
   .map(([x, z, vorn]) => {
-    const halter = new THREE.Group(); halter.position.set(x * 0.95 / 0.75, -0.4, z);
+    const halter = new THREE.Group(); halter.position.set(x * 0.95 / 0.88, -0.4, z);
     const rad = new THREE.Mesh(radGeo, radMat); rad.castShadow = true;
     halter.add(rad); auto.add(halter);
     return { lokal: new THREE.Vector3(x, 0, z), vorn, halter, rad, abstand: P.FEDER_LAENGE + P.RAD_RADIUS, kontakt: false };
@@ -647,11 +651,13 @@ function maxEinschlag(tempo) {
 // Neues Vorwärts-Tempo nach den gemessenen Formeln (km/h)
 function neuesTempo(v, gas, bremse, dt) {
   if (gas && !bremse) {
-    if (v < 0) return Math.min(0, v + P.BREMSE * dt);            // rückwärts rollend: erst abbremsen
+    // rückwärts rollend: erst abbremsen – darf dabei über 0 hinaus wieder vorwärts gehen
+    // (sonst bleibt man an Steigungen hängen: Hang zieht zurück, Bremse stoppt bei 0, immer wieder)
+    if (v < 0) return Math.min(v + P.BREMSE * dt, P.ANTRIEB * dt);
     return v + (P.ANTRIEB - P.WIDERSTAND * v) * dt;
   }
   if (bremse) {
-    if (v > 0) return Math.max(0, v - P.BREMSE * dt);             // bremsen
+    if (v > 0) return Math.max(v - P.BREMSE * dt, -P.RUECK_ANTRIEB * dt); // bremsen (danach rückwärts)
     return v - P.RUECK_ANTRIEB * (1 - (v / P.RUECK_MAX) ** 2) * dt; // rückwärts fahren
   }
   v -= P.WIDERSTAND * v * dt;                                     // rollen
@@ -671,7 +677,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   lin.set(lv.x, lv.y, lv.z); ang.set(av.x, av.y, av.z);
 
   // 1) Vier Federn: Strahl von jedem Aufhängepunkt nach unten
-  let kontakte = 0, radAufWand = false;
+  let kontakte = 0, radAufWand = false, wandUnterRad = null;
   normale.set(0, 0, 0);
   fuehrung = null;
   linVorher.copy(lin);   // Geschwindigkeit, bevor die Federn drücken
@@ -691,7 +697,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     normale.x += treffer.normal.x; normale.y += treffer.normal.y; normale.z += treffer.normal.z;
     const h = treffer.collider ? treffer.collider.handle : treffer.colliderHandle;
     if (fuehrungNach.has(h)) fuehrung = fuehrungNach.get(h);
-    if (wandNach.has(h)) radAufWand = true;      // Rad fährt gerade über eine Leitplanke
+    if (wandNach.has(h)) { radAufWand = true; wandUnterRad = h; }  // Rad fährt gerade auf eine Leitplanke
     hebel.subVectors(punkt, pos);
     vPunkt.crossVectors(ang, hebel).add(lin);
     const kraft = Math.max(0, FEDER_K * einfederung - FEDER_C * vPunkt.dot(oben));
@@ -823,12 +829,27 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
       }
     }
   }
-  // Über eine Leitplanke fahren: einmal kräftig abbremsen (Richtung bleibt)
+  // Rad auf der Leitplanke (Bordstein):
+  //  flach angefahren (< KANTE_WINKEL) → zurück auf die Bahn lenken, etwas Tempo kostet es
+  //  steil angefahren                  → drüber, aber stark abgebremst
   if (radAufWand && zustand.wandPause === 0 && vf > 5) {
     zustand.trefferZahl++; zustand.wandPause = 0.4;
-    const lv5 = autoKoerper.linvel(), h = oben.clone().multiplyScalar(lv5.x * oben.x + lv5.y * oben.y + lv5.z * oben.z);
-    const flach = V(lv5.x, lv5.y, lv5.z).sub(h).multiplyScalar(P.WAND_DRUEBER);
-    autoKoerper.setLinvel(flach.add(h), true);
+    const lv5 = autoKoerper.linvel(), v5 = V(lv5.x, lv5.y, lv5.z);
+    const h = oben.clone().multiplyScalar(v5.dot(oben));
+    const flach = v5.clone().sub(h), tempo5 = flach.length();
+    const bahn = wandBahn.get(wandUnterRad);
+    let q = null, bd = Infinity;
+    if (bahn) for (const b of bahn) { const d = b.p.distanceToSquared(pos); if (d < bd) { bd = d; q = b; } }
+    const quer = q && tempo5 > 0.1 ? Math.abs(flach.dot(q.r)) / tempo5 : 1;   // sin(Anfahrwinkel)
+    if (q && quer < Math.sin(P.KANTE_WINKEL * Math.PI / 180)) {
+      const entlang = q.tan.clone().multiplyScalar(Math.sign(flach.dot(q.tan)) || 1);
+      const zurMitte = q.r.clone().multiplyScalar(-Math.sign(pos.clone().sub(q.p).dot(q.r)));
+      autoKoerper.setLinvel(entlang.multiplyScalar(tempo5 * P.KANTE_ABPRALL).addScaledVector(zurMitte, 3).add(h.y > 0 ? V() : h), true);
+      const diff = Math.atan2(V().crossVectors(vorn, entlang.clone().normalize()).dot(oben), vorn.dot(entlang.clone().normalize()));
+      zustand.ausrichten = { rate: diff / 0.15, zeit: 0.15 };
+    } else {
+      autoKoerper.setLinvel(flach.multiplyScalar(P.WAND_DRUEBER).add(h), true);
+    }
   }
   if (radAufWand && zustand.wandPause > 0) zustand.wandPause = 0.4;
   zustand.wandVorher = anWand || radAufWand;
@@ -970,7 +991,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 // Zum Testen am PC (Konsole): Zugriff auf Auto und Werte
-window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken, saeulen };
+window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken, saeulen, welt, RAEDER, wandNach };
 </script>
 <script>
   addEventListener('error', e => {
