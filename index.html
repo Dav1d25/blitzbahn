@@ -223,6 +223,9 @@ const P = {
   RAUCH_MAX: 256,         // höchstens so viele Rauchwölkchen gleichzeitig
   BODENHAFTUNG: 1,        // m/s – so schnell dürfen die Federn das Auto höchstens von der Fahrbahn wegdrücken
   STEILKURVE_GRIP: 1.8,   // so viel enger kann man in Steilkurven lenken (mehr Tempo möglich)
+  ANSCHLAG: 0.3,          // m Einfederung – ab hier lenkt die Fahrbahn das Auto um, statt es aufschlagen zu lassen
+  FAHRBAHN_AUSRICHTEN: 12,// 1/s – so schnell kippt das Auto in die Lage der Fahrbahn
+  FAHRBAHN_FOLGEN: 30,    // 1/s – wie schnell es diese Kipp-Drehung übernimmt
   KANTEN_DAEMPFUNG: 30,   // wie stark Kippen gebremst wird, wenn nur 1–2 Räder Bodenkontakt haben
   GRIP: 24,            // wie schnell seitliches Rutschen abgebaut wird (höher = weniger Drift)
   // Federung
@@ -338,7 +341,6 @@ const TEILE = {
   kurveLang:  richtung => TEILE.kurve(richtung, 2),          // Radius 40 m
   kurveWeit:  (richtung, felder = 5) => TEILE.kurve(richtung, felder),   // Radius 100 m – für hohes Tempo
   hochkurve:  richtung => ({ ...TEILE.kurve(richtung, 2), waende: false }), // erhöhte Kurve ohne Leitplanken
-  steilkurve: (richtung, felder = 2) => ({ ...TEILE.kurve(richtung, felder, 0.6), kleben: true }), // bis 34° geneigt
   kehre:      richtung => TEILE.kurve(richtung, 1, 0, 2),    // Haarnadel: 180° mit Radius 20 m
   sKurve: richtung => {                                      // versetzt die Fahrbahn um ein Feld zur Seite
     const sg = seiteVon(richtung);
@@ -508,6 +510,12 @@ function baueStrecke(liste) {
     const [x, y, z, dreh] = t.ende;
     pos.add(rotY([x, y, z], yaw)); yaw += dreh;
   }
+  // Brücken: keine Stütze darf auf einer tiefer liegenden Fahrbahn stehen
+  for (let i = saeulen.length - 1; i >= 0; i--) {
+    const s = saeulen[i];
+    const blockiert = bahnPunkte.some(b => b.p.y < s.y - 4 && Math.hypot(b.p.x - s.x, b.p.z - s.z) < BREIT / 2 + 3);
+    if (blockiert) saeulen.splice(i, 1);
+  }
   // Stützen als ein gemeinsames Modell (schnell) + Kollision
   const geo = new THREE.BoxGeometry(1.4, 1, 1.4); geo.translate(0, 0.5, 0);
   const sm = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xb9b2a6, flatShading: true }), Math.max(1, saeulen.length));
@@ -546,56 +554,70 @@ const STRECKEN = [
       ['start'], ['gerade', 2], ['kurveKurz', 'rechts'], ['gerade'],
       ['steigung'], ['hochbahn', 2], ['gefaelle'],
       ['kurveLang', 'links'], ['sKurve', 'rechts'], ['kontrollpunkt'], ['gerade', 2],
-      ['steilkurve', 'rechts'], ['gerade'], ['steilkurve', 'rechts'], ['gerade', 2],
+      ['kurveLang', 'rechts'], ['gerade'], ['kurveLang', 'rechts'], ['gerade', 2],
       ['rampe'], ['luecke', 2], ['gerade', 2], ['breit', 2],
       ['looping', 'links'], ['gerade'], ['kurveKurz', 'rechts'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 4], ['ziel'],
     ] },
-  { nr: 1, name: 'Warm-up', tipp: 'Einfach Gas geben und die Kurven sauber nehmen. ↺ 1× bringt dich zum letzten Tor.',
-    teile: [['start'], ['gerade', 4], ['kurveLang', 'rechts'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 3],
-            ['kurveLang', 'rechts'], ['gerade', 2], ['kurveLang', 'links'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 4], ['ziel']] },
-  { nr: 2, name: 'Schikane', tipp: 'Vor engen Kurven kurz bremsen – oder ▼ beim Lenken für ein engeres Einlenken.',
-    teile: [['start'], ['gerade', 3], ['sKurve', 'links'], ['sKurve', 'rechts'], ['kontrollpunkt'], ['gerade', 2],
-            ['kurveKurz', 'rechts'], ['kurveKurz', 'links'], ['gerade', 2], ['sKurve', 'rechts'], ['sKurve', 'links'], ['kontrollpunkt'],
-            ['gerade', 3], ['kurveKurz', 'links'], ['gerade'], ['kurveKurz', 'rechts'], ['sKurve', 'links'], ['kontrollpunkt'], ['gerade', 3], ['ziel']] },
+  // 1: Schleife mit Brücke über die Startgerade – das erste Tor liegt oben auf der Brücke
+  { nr: 1, name: 'Warm-up', tipp: 'Einmal rum und über die Brücke – das erste Tor liegt oben auf der Brücke.',
+    teile: [['start'], ['gerade', 5], ['kurveLang', 'rechts'], ['gerade'], ['kurveLang', 'rechts'], ['steigung', 2], ['hochbahn'],
+            ['kurveLang', 'rechts'], ['hochbahn', 2], ['kontrollpunkt'], ['hochbahn', 2], ['gefaelle', 2], ['kurveLang', 'links'],
+            ['gerade', 2], ['kurveLang', 'links'], ['gerade', 3], ['kontrollpunkt'], ['gerade'], ['steigung'], ['gefaelle'],
+            ['gerade'], ['ziel']] },
+  // 2: S-Kurven, ein kleiner Sprung, Zickzack, dann hinauf und eine hohe Kurve
+  { nr: 2, name: 'Schikane', tipp: 'Kurz bremsen vor den engen Ecken – oder ▼ beim Lenken für ein engeres Einlenken.',
+    teile: [['start'], ['gerade', 2], ['sKurve', 'links'], ['sKurve', 'rechts'], ['kurveKurz', 'rechts'], ['gerade'], ['rampe', 2],
+            ['luecke'], ['gerade'], ['kontrollpunkt'], ['sKurve', 'links'], ['kurveKurz', 'links'], ['gerade'], ['kurveKurz', 'links'],
+            ['sKurve', 'rechts'], ['kontrollpunkt'], ['gerade'], ['steigung', 2], ['hochbahn'], ['kurveLang', 'rechts'], ['hochbahn', 2],
+            ['gefaelle', 2], ['sKurve', 'rechts'], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
+  // 3: Wellen – Kuppen hintereinander, ein großer Buckel und ein Plateau
   { nr: 3, name: 'Hügel', tipp: 'Auf den Kuppen hebt das Auto ab – schnell, aber gerade bleiben!',
-    teile: [['start'], ['gerade', 2], ['steigung'], ['gefaelle'], ['gerade', 2], ['steigung', 2], ['gefaelle', 2], ['kontrollpunkt'],
-            ['kurveLang', 'links'], ['gerade'], ['steigung'], ['gerade', 2], ['gefaelle'], ['kontrollpunkt'], ['gerade'],
-            ['steigung'], ['gefaelle'], ['steigung'], ['gefaelle'], ['kurveLang', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
-  { nr: 4, name: 'Absprung', tipp: 'Mit Schwung über die Lücken. In der Luft ▼ = Luftbremse, damit du gerade landest.',
-    teile: [['start'], ['gerade', 3], ['rampe'], ['luecke', 2], ['gerade', 2], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade', 2],
-            ['steigung', 2], ['hochbahn'], ['rampe'], ['luecke', 3, -2], ['gerade', 3], ['kontrollpunkt'], ['kurveLang', 'rechts'],
-            ['gerade', 2], ['rampe', 4], ['luecke', 3], ['gerade', 2], ['kurveLang', 'rechts'], ['gerade', 2], ['rampe', 2],
-            ['luecke', 2], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
-  { nr: 5, name: 'Steilkurve', tipp: 'In den geneigten Kurven kannst du viel schneller fahren als in flachen.',
-    teile: [['start'], ['gerade', 4], ['steilkurve', 'rechts'], ['gerade', 3], ['steilkurve', 'rechts'], ['kontrollpunkt'], ['gerade', 2],
-            ['steilkurve', 'links', 3], ['gerade', 3], ['kontrollpunkt'], ['steilkurve', 'links'], ['gerade', 2], ['steilkurve', 'rechts'],
-            ['gerade', 3], ['steilkurve', 'rechts', 3], ['gerade', 4], ['steilkurve', 'links'], ['gerade', 3], ['steilkurve', 'links'],
-            ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
-  { nr: 6, name: 'Hochbahn', tipp: 'Keine Leitplanken hier oben – wer runterfällt, tippt ↺.',
-    teile: [['start'], ['gerade', 2], ['steigung', 2], ['hochbahn', 3], ['kontrollpunkt'], ['hochkurve', 'links'], ['hochbahn', 2],
-            ['hochkurve', 'rechts'], ['hochbahn', 2], ['kontrollpunkt'], ['hochbahn', 2], ['hochkurve', 'rechts'], ['hochbahn', 3],
-            ['hochkurve', 'rechts'], ['hochbahn', 2], ['hochkurve', 'links'], ['hochbahn', 2], ['kontrollpunkt'], ['gefaelle', 2], ['gerade', 2], ['kurveLang', 'links'], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
-  { nr: 7, name: 'Looping', tipp: 'Mit Vollgas in den Looping – mindestens etwa 110 km/h.',
-    teile: [['start'], ['gerade', 4], ['kontrollpunkt'], ['gerade', 2], ['breit', 2], ['looping', 'links'], ['gerade', 2],
-            ['kurveLang', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['gerade', 3], ['kurveLang', 'rechts'], ['gerade', 3], ['breit', 2],
-            ['looping', 'rechts'], ['gerade'], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade', 3], ['sKurve', 'rechts'], ['gerade', 2],
-            ['kurveLang', 'links'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
-  { nr: 8, name: 'Vollgas', tipp: 'Über 400 km/h auf den Geraden – vor den weiten Kurven etwas Tempo rausnehmen.',
-    teile: [['start'], ['gerade', 24], ['kontrollpunkt'], ['gerade', 10], ['kurveWeit', 'rechts'], ['gerade', 10], ['kontrollpunkt'],
-            ['gerade', 5], ['steilkurve', 'rechts', 4], ['gerade', 14], ['kontrollpunkt'], ['gerade', 8], ['kurveWeit', 'links'],
-            ['gerade', 10], ['kontrollpunkt'], ['gerade', 6], ['ziel']] },
-  { nr: 9, name: 'Kehren', tipp: 'Enge Haarnadeln: bremsen und dabei lenken (Drift) zieht dich herum.',
-    teile: [['start'], ['gerade', 2], ['kehre', 'rechts'], ['gerade', 3], ['kehre', 'links'], ['gerade'], ['kontrollpunkt'], ['gerade'],
-            ['kehre', 'rechts'], ['gerade', 3], ['kehre', 'links'], ['gerade'], ['kontrollpunkt'], ['gerade'], ['sKurve', 'links'],
-            ['gerade'], ['kontrollpunkt'], ['gerade'], ['kehre', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2],
+    teile: [['start'], ['gerade', 2], ['steigung'], ['gefaelle'], ['steigung'], ['gefaelle'], ['kontrollpunkt'], ['kurveLang', 'links'],
+            ['gerade'], ['steigung', 2], ['gefaelle', 2], ['gerade'], ['kontrollpunkt'], ['kurveLang', 'rechts'], ['steigung'],
+            ['gerade'], ['steigung'], ['kurveLang', 'rechts'], ['gerade'], ['gefaelle', 2], ['steigung'], ['gefaelle'],
             ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
-  { nr: 10, name: 'Finale', tipp: 'Alles zusammen: Sprung, Looping, Kehre, Hochbahn, Steilkurven – viel Glück!',
-    teile: [['start'], ['gerade', 4], ['sKurve', 'links'], ['kontrollpunkt'], ['steilkurve', 'rechts'], ['gerade', 2], ['rampe'], ['luecke', 2],
-            ['gerade', 2], ['kontrollpunkt'], ['kurveLang', 'links'], ['breit', 3], ['looping', 'rechts'], ['gerade', 2], ['kontrollpunkt'],
-            ['kehre', 'rechts'], ['gerade', 3], ['steigung', 2], ['hochbahn', 2], ['hochkurve', 'links'], ['hochbahn', 2], ['kontrollpunkt'],
-            ['gefaelle', 2], ['steilkurve', 'links'], ['gerade', 4], ['kontrollpunkt'], ['kurveKurz', 'rechts'], ['steigung'], ['gefaelle'],
-            ['gerade', 3], ['kurveLang', 'rechts'], ['gerade', 4], ['steilkurve', 'rechts'], ['gerade', 3], ['sKurve', 'links'],
-            ['gerade', 2], ['kontrollpunkt'], ['gerade', 3], ['ziel']] },
+  // 4: Sprünge – einer davon von 10 m Höhe tief hinunter
+  { nr: 4, name: 'Absprung', tipp: 'Mit Schwung über die Lücken. In der Luft ▼ = Luftbremse, damit du gerade landest.',
+    teile: [['start'], ['gerade', 3], ['rampe', 2], ['luecke', 2], ['gerade', 2], ['kontrollpunkt'], ['kurveLang', 'rechts'], ['gerade'],
+            ['kurveLang', 'rechts'], ['steigung', 2], ['gerade'], ['rampe', 3], ['luecke', 4, -2], ['gerade', 4], ['kontrollpunkt'],
+            ['kurveLang', 'links'], ['gerade', 2], ['rampe', 4], ['luecke', 3], ['gerade', 2], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 5: eine Acht – auf der zweiten Runde über die Brücke, quer über den eigenen Weg
+  { nr: 5, name: 'Achterbahn', tipp: 'Eine Acht: Beim zweiten Mal fährst du oben über die Brücke, quer über deine eigene Spur.',
+    teile: [['start'], ['gerade', 3], ['kurveLang', 'rechts'], ['gerade'], ['kurveLang', 'rechts'], ['gerade', 4], ['kontrollpunkt'],
+            ['gerade'], ['kurveLang', 'links'], ['gerade'], ['kurveLang', 'links'], ['steigung', 2], ['hochbahn'], ['hochkurve', 'links'],
+            ['hochbahn', 2], ['kontrollpunkt'], ['hochbahn'], ['hochkurve', 'links'], ['gefaelle', 2], ['gerade'],
+            ['kurveLang', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 6: hoch oben ohne Leitplanken, mit Sprüngen zwischen den Hochbahn-Stücken
+  { nr: 6, name: 'Hochbahn', tipp: 'Keine Leitplanken hier oben – und zweimal springst du von Bahn zu Bahn.',
+    teile: [['start'], ['gerade', 2], ['steigung', 2], ['steigung', 1], ['hochbahn', 2], ['kontrollpunkt'], ['hochkurve', 'links'],
+            ['hochbahn'], ['rampe', 2], ['luecke', 2, -1], ['hochbahn', 3], ['hochkurve', 'rechts'], ['hochbahn', 2], ['kontrollpunkt'],
+            ['hochkurve', 'rechts'], ['hochbahn'], ['rampe', 2], ['luecke', 2, -1], ['hochbahn', 3], ['hochkurve', 'links'], ['hochbahn'],
+            ['kontrollpunkt'], ['gefaelle', 1], ['gerade', 2], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 7: zwei Loopings, dazwischen eine Hochkurve, am Ende ein Sprung
+  { nr: 7, name: 'Looping', tipp: 'Mit Vollgas in die Loopings – mindestens etwa 110 km/h.',
+    teile: [['start'], ['gerade', 4], ['kontrollpunkt'], ['gerade'], ['breit', 2], ['looping', 'links'], ['gerade'], ['kurveLang', 'rechts'],
+            ['gerade'], ['steigung', 2], ['hochbahn'], ['kurveLang', 'rechts'], ['gerade'], ['kontrollpunkt'], ['gefaelle', 2], ['gerade'], ['breit', 2],
+            ['looping', 'rechts'], ['gerade'], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade', 2], ['rampe', 2], ['luecke', 2],
+            ['gerade'], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
+  // 8: über 400 km/h, ein riesiger Sprung bei Vollgas, weite Kurven
+  { nr: 8, name: 'Vollgas', tipp: 'Über 400 km/h – und mitten auf der Geraden ein riesiger Sprung. Vor den weiten Kurven Tempo raus.',
+    teile: [['start'], ['gerade', 22], ['kontrollpunkt'], ['gerade', 6], ['rampe', 2], ['luecke', 6], ['gerade', 6], ['kurveWeit', 'rechts'],
+            ['gerade', 8], ['kontrollpunkt'], ['gerade', 6], ['kurveWeit', 'rechts', 6], ['gerade', 10], ['steigung'], ['gefaelle'],
+            ['gerade', 4], ['kontrollpunkt'], ['gerade', 6], ['kurveWeit', 'links'], ['gerade', 8], ['kontrollpunkt'], ['gerade', 4], ['ziel']] },
+  // 9: Serpentinen den Berg hinauf, dann ein Sprung tief hinunter
+  { nr: 9, name: 'Kehren', tipp: 'Serpentinen bergauf: bremsen und dabei lenken (Drift) zieht dich herum. Oben wartet ein Sprung.',
+    teile: [['start'], ['gerade', 2], ['kehre', 'rechts'], ['steigung'], ['gerade'], ['kehre', 'links'], ['steigung'], ['kontrollpunkt'],
+            ['kehre', 'rechts'], ['steigung'], ['gerade'], ['kehre', 'links'], ['kontrollpunkt'], ['hochbahn', 2], ['rampe', 2],
+            ['luecke', 3, -3], ['gerade'], ['kehre', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['sKurve', 'links'], ['kehre', 'links'],
+            ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 10: alles zusammen
+  { nr: 10, name: 'Finale', tipp: 'Alles zusammen: Sprünge, Hochbahn, Looping, Kehre und ein Sprung aus 12 m Höhe – viel Glück!',
+    teile: [['start'], ['gerade', 3], ['sKurve', 'links'], ['kontrollpunkt'], ['kurveLang', 'rechts'], ['gerade'], ['rampe', 2], ['luecke', 2],
+            ['gerade', 2], ['kurveLang', 'rechts'], ['steigung', 2], ['hochbahn'], ['kontrollpunkt'], ['hochkurve', 'links'], ['hochbahn', 3],
+            ['gefaelle', 2], ['breit', 2], ['looping', 'rechts'], ['gerade'], ['kontrollpunkt'], ['kehre', 'rechts'], ['gerade', 2],
+            ['steigung', 2], ['hochbahn'], ['rampe', 2], ['luecke', 3, -2], ['gerade', 2], ['kontrollpunkt'], ['kurveLang', 'links'],
+            ['sKurve', 'rechts'], ['steigung'], ['gefaelle'], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade', 3], ['kontrollpunkt'],
+            ['gerade', 2], ['ziel']] },
 ];
 const streckenWahl = (() => {
   let nr = 1;
@@ -1054,7 +1076,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   lin.set(lv.x, lv.y, lv.z); ang.set(av.x, av.y, av.z);
 
   // 1) Vier Federn: Strahl von jedem Aufhängepunkt nach unten
-  let kontakte = 0, radAufWand = false, wandUnterRad = null;
+  let kontakte = 0, radAufWand = false, wandUnterRad = null, maxEinfederung = 0;
   normale.set(0, 0, 0);
   fuehrung = null;
   linVorher.copy(lin);   // Geschwindigkeit, bevor die Federn drücken
@@ -1070,6 +1092,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     if (treffer.normal.y * oben.y + treffer.normal.x * oben.x + treffer.normal.z * oben.z < 0.5) continue; // Wandfläche ist kein Boden
     const einfederung = Math.min(maxL - d, P.FEDER_LAENGE);
     if (einfederung <= 0) continue;
+    maxEinfederung = Math.max(maxEinfederung, einfederung);
     rad.abstand = d; rad.kontakt = true; kontakte++;
     // Aufsetzpunkt unter dem (gezeichneten) Rad – dort entstehen Bremsspuren
     rad.boden.copy(rad.lokal).applyQuaternion(quat).add(pos).addScaledVector(oben, -d);
@@ -1105,6 +1128,19 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
       const weg = lin.dot(normale);
       const grenze = Math.max(linVorher.dot(normale), P.BODENHAFTUNG);
       if (weg > grenze) lin.addScaledVector(normale, grenze - weg);
+    }
+    if (kontakte >= 2) {
+      normale.normalize();
+      // Anschlag: Sind die Federn fast ganz eingedrückt (z. B. am Fuß eines steilen Hügels), lenkt die
+      // Fahrbahn die Bewegung nach oben um – sonst stößt die Karosserie gegen die Fahrbahn und bleibt hängen.
+      const hinein = lin.dot(normale);
+      if (hinein < 0 && maxEinfederung > P.ANSCHLAG) lin.addScaledVector(normale, -hinein);
+      // Das Auto kippt (nicken/rollen) zügig mit der Fahrbahn mit: die Kipp-Drehung wird
+      // ein Stück in Richtung „zur Fahrbahn-Lage hin“ gezogen (Lenk-Drehung bleibt unberührt)
+      const achse = V().crossVectors(oben, normale).multiplyScalar(P.FAHRBAHN_AUSRICHTEN);
+      const gier = ang.dot(oben), kippen = ang.clone().addScaledVector(oben, -gier);
+      kippen.lerp(achse, 1 - Math.exp(-P.FAHRBAHN_FOLGEN * dt));
+      ang.copy(kippen).addScaledVector(oben, gier);
     }
     const lenkAnteil = Math.min(1, Math.abs(zustand.lenk) / maxEinschlag(vf));
     const vfNeu = neuesTempo(vf, gas, bremse, lenkAnteil, dt);
@@ -1198,11 +1234,14 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   if (anWand) {
     // Kippschutz: eine Wand darf das Auto nicht um seine Längsachse rollen
     // und auf ebener Fahrbahn nicht hochklettern lassen.
+    // (Nur Rollen wird gebremst und nur das Abheben von der Fahrbahn – bergauf fahren bleibt möglich.)
     const av3 = autoKoerper.angvel(), lv3 = autoKoerper.linvel();
     ang.set(av3.x, av3.y, av3.z).addScaledVector(vorn, -ang.dot(vorn));
-    if (oben.y > 0.9) ang.addScaledVector(seite, -ang.dot(seite));
     autoKoerper.setAngvel(ang, true);
-    if (oben.y > 0.9 && lv3.y > 0) autoKoerper.setLinvel({ x: lv3.x, y: 0, z: lv3.z }, true);
+    if (kontakte >= 2) {
+      const bodenN = normale.clone().normalize(), v3 = V(lv3.x, lv3.y, lv3.z), weg = v3.dot(bodenN);
+      if (weg > 0.5) autoKoerper.setLinvel(v3.addScaledVector(bodenN, 0.5 - weg), true);
+    }
   }
   zustand.trefferZahl = (zustand.trefferZahl || 0);
   zustand.wandPause = Math.max(0, zustand.wandPause - dt);
@@ -1216,11 +1255,21 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     const nachher = V(lv3.x, lv3.y, lv3.z);
     const stoss = nachher.clone().sub(linStep); stoss.addScaledVector(oben, -stoss.dot(oben));
     const richtung = linStep.clone(); richtung.addScaledVector(oben, -richtung.dot(oben));
+    // Bei Leitplanken kennen wir die Richtung der Wand genau aus der Strecke (zuverlässig auch an Hügeln,
+    // wo die Fahrbahn das Auto im selben Moment anhebt). Nur bei Stützen wird sie aus dem Stoß geschätzt.
+    let n = null;
+    const bahn = wandBahn.get(wand.handle);
+    if (bahn) {
+      let q = bahn[0], bd = Infinity;
+      for (const b of bahn) { const d = b.p.distanceToSquared(pos); if (d < bd) { bd = d; q = b; } }
+      n = q.r.clone().multiplyScalar(-Math.sign(pos.clone().sub(q.p).dot(q.r)) || 1);   // zeigt von der Wand zur Bahnmitte
+      richtung.addScaledVector(q.n, -richtung.dot(q.n));
+    }
     const tempo = richtung.length();
-    if (stoss.length() > 0.3 && tempo > 1) {
+    if ((n || stoss.length() > 0.3) && tempo > 1 && (!n || richtung.dot(n) < -0.05 * tempo)) {
       zustand.trefferZahl++;
       zustand.wandPause = 0.4;
-      const n = stoss.normalize(); richtung.normalize();
+      n = n || stoss.normalize(); richtung.normalize();
       const hoch = oben.clone().multiplyScalar(nachher.dot(oben));
       if (Math.abs(richtung.dot(n)) > 0.5) {
         // frontal (steiler als 30°): Rückprall mit 11 % des Tempos
