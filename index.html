@@ -119,7 +119,7 @@
 <div id="rechts" class="knopf" data-halten="rechts">▶</div>
 
 <div id="hinweis">▲ halten = Gas &nbsp;·&nbsp; ▼ = Bremse/Rückwärts &nbsp;·&nbsp; ◀ ▶ = Lenken<br>
-  <small>Testgelände: rechts Schanzen, links Hügel und Wandgasse · in der Luft ▼ = Luftbremse<br>Am PC: W A S D oder Pfeiltasten, R = Reset</small></div>
+  <small>Teile-Parcours: alle Bauteile hintereinander · Looping ab ca. 130 km/h · in der Luft ▼ = Luftbremse<br>Am PC: W A S D oder Pfeiltasten, R = Reset</small></div>
 <div id="pausiert">Pause<small>Irgendwo tippen zum Weiterfahren</small></div>
 <div id="laden">Lädt …</div>
 <div id="quer">Bitte das iPad quer halten 🔄</div>
@@ -168,7 +168,6 @@ const P = {
 };
 const FEDER_K = P.MASSE * P.SCHWERKRAFT / (4 * P.FEDER_RUHE);              // Federhärte je Rad
 const FEDER_C = P.DAEMPFUNG * 2 * Math.sqrt(FEDER_K * P.MASSE / 4);         // Dämpfer je Rad
-const START = { x: 0, y: P.FEDER_LAENGE + P.RAD_RADIUS - P.FEDER_RUHE + 0.01, z: 0 };
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 await RAPIER.init();
@@ -220,69 +219,223 @@ scene.add(boden);
 const bodenKoerper = welt.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -1, 0));
 welt.createCollider(RAPIER.ColliderDesc.cuboid(BODEN / 2, 1, BODEN / 2).setFriction(0.5), bodenKoerper);
 
-const linie = new THREE.Mesh(new THREE.PlaneGeometry(12, 1.5), new THREE.MeshBasicMaterial({ color: 0xffffff }));
-linie.rotation.x = -Math.PI / 2; linie.position.set(0, 0.02, 3);
-scene.add(linie);
-
-// ---------- Bausteine fürs Testgelände ----------
+// =====================================================================
+//  BAUKASTEN – die Streckenteile (Schritt 3)
+//  Eine Strecke ist eine Liste von Teilen. Jedes Teil setzt am Ende des vorigen an.
+//  Ein Rasterfeld = 20 m, eine Höhenstufe = 5 m, Fahrbahn 12 m breit.
+// =====================================================================
+const RASTER = 20, STUFE = 5, BREIT = 12, DICKE = 0.5, WAND_H = 1.2, RAND = 0.8, OBEN = 0.05;
 const fest = welt.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-const matRampe = new THREE.MeshLambertMaterial({ color: 0x9aa3ad, flatShading: true, side: THREE.DoubleSide });
-const matWand = new THREE.MeshLambertMaterial({ color: 0xe8e2d6, flatShading: true });
-const matRot = new THREE.MeshLambertMaterial({ color: 0xd8432e, flatShading: true });
+const fuehrungNach = new Map();  // Looping: Collider → Mittellinie (Spurführung)
+const marken = [];               // Start, Kontrollpunkte, Ziel (werden in Schritt 4 zu Regeln)
+const saeulen = [];              // Stützen unter erhöhten Teilen
+const bahnPunkte = [];           // Mittellinie der ganzen Strecke (für Tests)
+const seiteVon = r => (r === 'links' ? 1 : -1);
+// Kollisionsgruppen: (Mitglied << 16) | mit wem es zusammenstößt
+const GRUPPE_AUTO = (0x0001 << 16) | 0xFFFD, GRUPPE_LOOPING = (0x0002 << 16) | 0xFFFE;
 
-// Keil = Rampe: steigt in Blickrichtung von 0 auf "hoehe" an
-function keil(x, z, richtung, breite, laenge, hoehe) {
-  const w = breite / 2;
-  const pkt = [[-w,0,0],[w,0,0],[-w,0,laenge],[w,0,laenge],[-w,hoehe,laenge],[w,hoehe,laenge]];
-  const flaechen = [[0,1,5],[0,5,4],[2,3,5],[2,5,4],[0,2,4],[1,3,5],[0,1,3],[0,3,2]];
-  const pos = [];
-  for (const f of flaechen) for (const i of f) pos.push(...pkt[i]);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, matRampe);
-  mesh.position.set(x, 0, z); mesh.rotation.y = richtung;
-  mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
-  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, richtung, 0));
-  welt.createCollider(RAPIER.ColliderDesc.convexHull(new Float32Array(pkt.flat()))
-    .setTranslation(x, 0, z).setRotation(q).setFriction(0.5), fest);
-}
-// Quader (Plateau oder Wand)
-function quader(x, y, z, bx, by, bz, mat, istWand) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(bx, by, bz), mat);
-  mesh.position.set(x, y, z); mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
-  const c = welt.createCollider(RAPIER.ColliderDesc.cuboid(bx / 2, by / 2, bz / 2)
-    .setTranslation(x, y, z).setFriction(istWand ? 0.1 : 0.5), fest);
-  if (istWand) { c.wandNormale = bx < bz ? V(1, 0, 0) : V(0, 0, 1); wandCollider.push(c); }
-}
-// Schild mit Text
-function schild(text, x, z) {
-  const c = document.createElement('canvas'); c.width = 512; c.height = 128;
-  const g = c.getContext('2d');
-  g.fillStyle = '#13264a'; g.fillRect(0, 0, 512, 128);
-  g.fillStyle = '#ffc35a'; g.font = 'bold 64px system-ui, sans-serif';
-  g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, 68);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t }));
-  s.scale.set(12, 3, 1); s.position.set(x, 7, z); scene.add(s);
+// Jedes Teil beschreibt seine Mittellinie pfad(s) für s = 0 … 1, beginnend bei (0,0,0) in Fahrtrichtung +z.
+// ende = [x, y, z, Drehung] = wo das nächste Teil ansetzt.
+const TEILE = {
+  gerade:   (n = 1) => ({ pfad: s => [0, 0, RASTER * n * s], ende: [0, 0, RASTER * n, 0], stuecke: 2 * n }),
+  breit:    (n = 1) => ({ ...TEILE.gerade(n), breite: 2 * BREIT }),
+  hochbahn: (n = 1) => ({ ...TEILE.gerade(n), waende: false }),
+  start:         () => ({ ...TEILE.gerade(1), marke: 'start' }),
+  kontrollpunkt: () => ({ ...TEILE.gerade(1), marke: 'kontrollpunkt' }),
+  ziel:          () => ({ ...TEILE.gerade(1), marke: 'ziel' }),
+  kurve: (richtung, felder = 1, neigung = 0) => {
+    const r = RASTER * felder, sg = seiteVon(richtung);
+    return {
+      pfad: s => { const a = s * Math.PI / 2; return [sg * (r - r * Math.cos(a)), 0, r * Math.sin(a)]; },
+      neigung: neigung ? s => sg * neigung * Math.sin(Math.PI * s) : null,
+      ende: [sg * r, 0, r, sg * Math.PI / 2], stuecke: 12 * felder,
+    };
+  },
+  kurveKurz:  richtung => TEILE.kurve(richtung, 1),          // Radius 20 m
+  kurveLang:  richtung => TEILE.kurve(richtung, 2),          // Radius 40 m
+  steilkurve: richtung => TEILE.kurve(richtung, 2, 0.6),     // Radius 40 m, bis 34° nach innen geneigt
+  sKurve: richtung => {                                      // versetzt die Fahrbahn um ein Feld zur Seite
+    const sg = seiteVon(richtung);
+    return { pfad: s => [sg * RASTER * (1 - Math.cos(Math.PI * s)) / 2, 0, 3 * RASTER * s],
+             ende: [sg * RASTER, 0, 3 * RASTER, 0], stuecke: 20 };
+  },
+  steigung: (stufen = 1) => ({ pfad: s => [0, STUFE * stufen * (1 - Math.cos(Math.PI * s)) / 2, 2 * RASTER * s],
+                               ende: [0, STUFE * stufen, 2 * RASTER, 0], stuecke: 16 }),
+  gefaelle: (stufen = 1) => ({ pfad: s => [0, -STUFE * stufen * (1 - Math.cos(Math.PI * s)) / 2, 2 * RASTER * s],
+                               ende: [0, -STUFE * stufen, 2 * RASTER, 0], stuecke: 16 }),
+  rampe: (hoehe = 3) => ({ pfad: s => [0, hoehe * s, RASTER * s], ende: [0, 0, RASTER, 0], stuecke: 2,
+                           waende: false, fuellen: true }),
+  luecke: (n = 1) => ({ ende: [0, 0, RASTER * n, 0] }),     // nichts – zum Drüberspringen
+  looping: (richtung = 'links', radius = 12) => {           // Ausfahrt 14 m seitlich versetzt
+    const sg = seiteVon(richtung), versatz = 14;
+    return {
+      pfad: s => { const a = 2 * Math.PI * s;
+        return [sg * versatz * (s - Math.sin(a) / (2 * Math.PI)), radius * (1 - Math.cos(a)), radius * Math.sin(a) + RASTER * s]; },
+      oben: s => { const a = 2 * Math.PI * s; return [0, Math.cos(a), -Math.sin(a)]; },
+      ende: [sg * versatz, 0, RASTER, 0], stuecke: 96, fuehrung: true, saeulenlos: true,
+    };
+  },
+};
+
+// Farben der Teile (eigene Farbwahl)
+const F = {
+  strasse: new THREE.Color(0x7d858f), rot: new THREE.Color(0xd8432e), weiss: new THREE.Color(0xf2f2f2),
+  seite: new THREE.Color(0x59606a), wand: new THREE.Color(0xe8e2d6), wandOben: new THREE.Color(0x2e4a80),
+  schwarz: new THREE.Color(0x1d1d1d), start: new THREE.Color(0x3cba54), kontrollpunkt: new THREE.Color(0x22c3d6),
+};
+const rotY = (v, yaw) => { const c = Math.cos(yaw), s = Math.sin(yaw); return V(v[0] * c + v[2] * s, v[1], -v[0] * s + v[2] * c); };
+
+// Sammelt Dreiecke für Bild und Kollision
+class Netz {
+  constructor() { this.pos = []; this.farbe = []; }
+  dreieck(a, b, c, f) { for (const p of [a, b, c]) { this.pos.push(p.x, p.y, p.z); this.farbe.push(f.r, f.g, f.b); } }
+  viereck(a, b, c, d, f) { this.dreieck(a, b, c, f); this.dreieck(a, c, d, f); }
+  fertig(istWand) {
+    if (!this.pos.length) return null;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(this.farbe, 3));
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }));
+    mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+    const idx = new Uint32Array(this.pos.length / 3).map((_, i) => i);
+    const c = welt.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array(this.pos), idx)
+      .setFriction(istWand ? 0.1 : 0.5), fest);
+    if (istWand) wandCollider.push(c);
+    return c;
+  }
 }
 
-// Schanzen (rechts vom Start)
-keil(40, 80, 0, 10, 12, 2);                       // kleine Rampe
-schild('Kleine Rampe', 40, 70);
-keil(85, 80, 0, 12, 30, 7);                       // große Schanze …
-keil(85, 180, Math.PI, 14, 50, 7);                // … mit langem Landehang (20 m Lücke)
-schild('Schanze (ab ca. 100 km/h)', 85, 70);
-// Hügel (links)
-keil(-80, 60, 0, 14, 25, 4);
-quader(-80, 2, 90, 14, 4, 10, matRampe, false);
-keil(-80, 120, Math.PI, 14, 25, 4);
-schild('Hügel', -80, 50);
-// Wandgasse (weiter links): lange Seitenwände, am Ende eine Prallwand
-quader(-120, 1, 230, 1, 2, 420, matWand, true);
-quader(-150, 1, 230, 1, 2, 420, matWand, true);
-quader(-135, 1, 440, 31, 2, 1, matRot, true);
-schild('Wandgasse', -135, 10);
+function baueTeil(t, start, yaw) {
+  if (!t.pfad) return;
+  const N = t.stuecke, w = (t.breite || BREIT) / 2;
+  // 1) Mittellinie abtasten: Punkt, Fahrtrichtung, "oben" (Fahrbahn-Normale) und Seite
+  const pkt = [];
+  for (let i = 0; i <= N; i++) {
+    const s = i / N, s0 = Math.max(0, s - 1e-3), s1 = Math.min(1, s + 1e-3);
+    const tan = rotY(t.pfad(s1), yaw).sub(rotY(t.pfad(s0), yaw)).normalize();
+    const n = t.oben ? rotY(t.oben(s), yaw) : V(0, 1, 0);
+    n.addScaledVector(tan, -n.dot(tan)).normalize();
+    let r = V().crossVectors(n, tan).normalize();
+    const p = rotY(t.pfad(s), yaw).add(start);
+    p.y += OBEN;
+    const b = t.neigung ? t.neigung(s) : 0;
+    if (b) {
+      n.multiplyScalar(Math.cos(b)).addScaledVector(r, Math.sin(b)).normalize();
+      r = V().crossVectors(n, tan).normalize();
+      p.y += w * Math.abs(Math.sin(b));      // Innenkante bleibt auf Bodenhöhe
+    }
+    pkt.push({ p, n, r, tan, teil: t.name });
+  }
+  bahnPunkte.push(...pkt);
+  // 2) Fahrbahn: rot-weißer Rand, graue Mitte, darunter Dicke bzw. bis zum Boden gefüllt (Rampe)
+  const strasse = new Netz(), wand = new Netz();
+  const versatz = [-w, -w + RAND, w - RAND, w];
+  const oberseite = q => versatz.map(o => q.p.clone().addScaledVector(q.r, o));
+  const unterseite = q => [-w, w].map(o => {
+    const v = q.p.clone().addScaledVector(q.r, o);
+    if (t.fuellen) v.y = start.y - DICKE; else v.addScaledVector(q.n, -DICKE);
+    return v;
+  });
+  for (let i = 0; i < N; i++) {
+    const A = oberseite(pkt[i]), B = oberseite(pkt[i + 1]);
+    const rand = i % 2 ? F.rot : F.weiss;
+    strasse.viereck(A[0], A[1], B[1], B[0], rand);
+    strasse.viereck(A[1], A[2], B[2], B[1], F.strasse);
+    strasse.viereck(A[2], A[3], B[3], B[2], rand);
+    const U = unterseite(pkt[i]), W = unterseite(pkt[i + 1]);
+    strasse.viereck(A[0], B[0], W[0], U[0], F.seite);
+    strasse.viereck(A[3], B[3], W[1], U[1], F.seite);
+    strasse.viereck(U[0], U[1], W[1], W[0], F.seite);
+    // 3) Leitplanken links und rechts
+    if (t.waende !== false) for (const [k, sg] of [[0, -1], [3, 1]]) {
+      const ia = A[k], ib = B[k];
+      const oa = ia.clone().addScaledVector(pkt[i].r, sg * 0.5), ob = ib.clone().addScaledVector(pkt[i + 1].r, sg * 0.5);
+      const ha = pkt[i].n.clone().multiplyScalar(WAND_H), hb = pkt[i + 1].n.clone().multiplyScalar(WAND_H);
+      wand.viereck(ia, ib, ib.clone().add(hb), ia.clone().add(ha), F.wand);
+      wand.viereck(ia.clone().add(ha), ib.clone().add(hb), ob.clone().add(hb), oa.clone().add(ha), F.wandOben);
+      wand.viereck(oa, ob, ob.clone().add(hb), oa.clone().add(ha), F.wand);
+    }
+  }
+  // Stirnseiten (sichtbar z. B. am Rampenende)
+  for (const q of [pkt[0], pkt[N]]) { const A = oberseite(q), U = unterseite(q); strasse.viereck(A[0], A[3], U[1], U[0], F.seite); }
+  const fahrbahn = strasse.fertig(false);
+  wand.fertig(true);
+  if (t.fuehrung) {
+    fuehrungNach.set(fahrbahn.handle, pkt);
+    // Die Karosserie stößt nicht an die Looping-Fahrbahn – dort tragen nur die Räder (und die Spurführung)
+    fahrbahn.setCollisionGroups(GRUPPE_LOOPING);
+  }
+
+  // 4) Stützen unter erhöhten Stellen (alle ca. 12 m)
+  let weg = 6;
+  for (let i = 1; i <= N; i++) {
+    weg += pkt[i].p.distanceTo(pkt[i - 1].p);
+    const q = pkt[i];
+    if (weg >= 12 && !t.saeulenlos && q.n.y > 0.8 && q.p.y - DICKE > 1.5 && !t.fuellen) {
+      saeulen.push(V(q.p.x, q.p.y - DICKE, q.p.z)); weg = 0;
+    }
+  }
+  // 5) Tor und Linie für Start, Kontrollpunkt, Ziel
+  if (t.marke) {
+    const q = pkt[Math.floor(N / 2)];
+    const linie = new Netz(), tor = new Netz();
+    const reihen = 2, spalten = 12;
+    for (let a = 0; a < reihen; a++) for (let b = 0; b < spalten; b++) {
+      const f = t.marke === 'ziel' ? ((a + b) % 2 ? F.schwarz : F.weiss)
+              : t.marke === 'start' ? (b % 2 ? F.start : F.weiss) : F.kontrollpunkt;
+      const ecke = (da, db) => q.p.clone().addScaledVector(q.tan, -0.9 + 1.8 * da / reihen)
+        .addScaledVector(q.r, -w + 2 * w * db / spalten).addScaledVector(q.n, 0.02);
+      linie.viereck(ecke(a, b), ecke(a + 1, b), ecke(a + 1, b + 1), ecke(a, b + 1), f);
+    }
+    const farbe = t.marke === 'ziel' ? F.schwarz : F[t.marke];
+    const quader = (mitte, bx, by, bz, f) => {      // Quader in der Ausrichtung der Fahrbahn
+      const ex = q.r.clone().multiplyScalar(bx / 2), ey = q.n.clone().multiplyScalar(by / 2), ez = q.tan.clone().multiplyScalar(bz / 2);
+      const e = (sx, sy, sz) => mitte.clone().addScaledVector(ex, sx).addScaledVector(ey, sy).addScaledVector(ez, sz);
+      for (const [a, b, c, d] of [[e(-1,-1,-1), e(1,-1,-1), e(1,1,-1), e(-1,1,-1)], [e(-1,-1,1), e(1,-1,1), e(1,1,1), e(-1,1,1)],
+                                  [e(-1,1,-1), e(1,1,-1), e(1,1,1), e(-1,1,1)], [e(-1,-1,-1), e(-1,1,-1), e(-1,1,1), e(-1,-1,1)],
+                                  [e(1,-1,-1), e(1,1,-1), e(1,1,1), e(1,-1,1)]]) tor.viereck(a, b, c, d, f);
+    };
+    for (const sg of [-1, 1]) quader(q.p.clone().addScaledVector(q.r, sg * (w + 1)).addScaledVector(q.n, 3.5), 0.8, 7, 0.8, F.wandOben);
+    quader(q.p.clone().addScaledVector(q.n, 6.5), 2 * w + 2.8, 1.6, 0.5, farbe);
+    const lm = linie.fertig(false); welt.removeCollider(lm, false);
+    const tm = tor.fertig(false); welt.removeCollider(tm, false);
+    marken.push({ typ: t.marke, pos: q.p.clone(), tan: q.tan.clone(), r: q.r.clone(), breite: 2 * w });
+  }
+}
+
+function baueStrecke(liste) {
+  const pos = V(0, 0, 0); let yaw = 0;
+  for (const [name, ...werte] of liste) {
+    const t = TEILE[name](...werte); t.name = name;
+    baueTeil(t, pos, yaw);
+    const [x, y, z, dreh] = t.ende;
+    pos.add(rotY([x, y, z], yaw)); yaw += dreh;
+  }
+  // Stützen als ein gemeinsames Modell (schnell) + Kollision
+  const geo = new THREE.BoxGeometry(1.4, 1, 1.4); geo.translate(0, 0.5, 0);
+  const sm = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xb9b2a6, flatShading: true }), Math.max(1, saeulen.length));
+  saeulen.forEach((p, i) => {
+    sm.setMatrixAt(i, new THREE.Matrix4().makeScale(1, p.y, 1).setPosition(p.x, 0, p.z));
+    wandCollider.push(welt.createCollider(RAPIER.ColliderDesc.cuboid(0.7, p.y / 2, 0.7).setTranslation(p.x, p.y / 2, p.z), fest));
+  });
+  sm.count = saeulen.length; sm.castShadow = true; scene.add(sm);
+}
+
+// ---------- Teile-Parcours: jedes Bauteil kommt mindestens einmal vor ----------
+const PARCOURS = [
+  ['start'], ['gerade', 2], ['kurveKurz', 'rechts'], ['gerade'],
+  ['steigung'], ['hochbahn', 2], ['gefaelle'],
+  ['kurveLang', 'links'], ['sKurve', 'rechts'], ['kontrollpunkt'], ['gerade', 2],
+  ['steilkurve', 'rechts'], ['gerade'], ['steilkurve', 'rechts'], ['gerade', 2],
+  ['rampe'], ['luecke', 2], ['gerade', 2], ['breit', 2],
+  ['looping', 'links'], ['gerade'], ['kurveKurz', 'rechts'], ['gerade', 3], ['kontrollpunkt'], ['gerade', 4], ['ziel'],
+];
+baueStrecke(PARCOURS);
+const startMarke = marken.find(m => m.typ === 'start');
+const START = { x: startMarke.pos.x, y: startMarke.pos.y + P.FEDER_LAENGE + P.RAD_RADIUS - P.FEDER_RUHE + 0.01, z: startMarke.pos.z };
+const START_YAW = Math.atan2(startMarke.tan.x, startMarke.tan.z);
+const START_ROT = new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), START_YAW);
 
 // Bäume, Pfosten, Berge (nur Kulisse)
 let saat = 7;
@@ -295,20 +448,13 @@ const m = new THREE.Matrix4();
 for (let i = 0; i < 400; i++) {
   let x, z;
   do { x = (zufall() - 0.5) * 3600; z = (zufall() - 0.5) * 3600; }
-  while (Math.hypot(x, z) < 40 || (x > -180 && x < 130 && z > -30 && z < 700));
+  while (x > -400 && x < 60 && z > -60 && z < 340);   // keine Bäume auf dem Parcours
   const s = 0.7 + zufall() * 0.8;
   m.makeScale(s, s, s).setPosition(x, 1.5 * s, z); stamm.setMatrixAt(i, m);
   m.makeScale(s, s, s).setPosition(x, 6 * s, z); krone.setMatrixAt(i, m);
 }
 stamm.castShadow = krone.castShadow = true;
 scene.add(stamm, krone);
-const pfosten = new THREE.InstancedMesh(new THREE.BoxGeometry(0.6, 2.5, 0.6),
-  new THREE.MeshLambertMaterial({ color: 0xff7a1a }), 160);
-for (let i = 0; i < 80; i++) {
-  m.makeTranslation(-8, 1.25, 20 + i * 50); pfosten.setMatrixAt(i * 2, m);
-  m.makeTranslation(8, 1.25, 20 + i * 50); pfosten.setMatrixAt(i * 2 + 1, m);
-}
-pfosten.castShadow = true; scene.add(pfosten);
 const bergMat = new THREE.MeshLambertMaterial({ color: 0x5e8f5a, flatShading: true });
 for (let i = 0; i < 36; i++) {
   const w = (i / 36) * Math.PI * 2, r = 2050 + zufall() * 200;
@@ -347,13 +493,13 @@ scene.add(auto);
 
 // Physik-Körper des Autos
 const autoKoerper = welt.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
-  .setTranslation(START.x, START.y, START.z).setCanSleep(false).setCcdEnabled(true));
+  .setTranslation(START.x, START.y, START.z).setRotation(START_ROT).setCanSleep(false).setCcdEnabled(true));
 const autoCollider = welt.createCollider(RAPIER.ColliderDesc.cuboid(0.9, 0.25, 1.9)
-  .setMass(P.MASSE).setFriction(0.3)
+  .setMass(P.MASSE).setFriction(0.3).setCollisionGroups(GRUPPE_AUTO)
   .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), autoKoerper);
 // Kabine als eigener (gewichtsloser) Körperteil, damit sie nicht im Boden verschwindet
 const kabinenCollider = welt.createCollider(RAPIER.ColliderDesc.cuboid(0.65, 0.225, 0.8)
-  .setTranslation(0, 0.45, -0.3).setDensity(0).setFriction(0.3)
+  .setTranslation(0, 0.45, -0.3).setDensity(0).setFriction(0.3).setCollisionGroups(GRUPPE_AUTO)
   .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), autoKoerper);
 const ereignisse = new RAPIER.EventQueue(true);
 const wandNach = new Map(wandCollider.map(c => [c.handle, c]));
@@ -362,11 +508,11 @@ const wandNach = new Map(wandCollider.map(c => [c.handle, c]));
 const zustand = { lenk: 0, zeit: 0, laeuft: false, pause: false, kontakte: 0, wandVorher: false, wandPause: 0 };
 function zuruecksetzen() {
   autoKoerper.setTranslation(START, true);
-  autoKoerper.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+  autoKoerper.setRotation(START_ROT, true);
   autoKoerper.setLinvel({ x: 0, y: 0, z: 0 }, true);
   autoKoerper.setAngvel({ x: 0, y: 0, z: 0 }, true);
-  Object.assign(zustand, { lenk: 0, zeit: 0, laeuft: false, ausrichten: null });
-  kamYaw = 0;
+  Object.assign(zustand, { lenk: 0, zeit: 0, laeuft: false, ausrichten: null, fuehrungZeit: 0, fuehrungBahn: null, wandPause: 0, wandVorher: false });
+  kamZiel.copy(START_ROT); kamQuat.copy(START_ROT);
   messung.null100 = null; messung.brems = null;
 }
 
@@ -423,7 +569,39 @@ function kameraUmschalten() { cockpit = !cockpit; }
 
 // ---------- Fahrphysik ----------
 const quat = new THREE.Quaternion(), oben = V(), vorn = V(), seite = V();
-const pos = V(), lin = V(), ang = V(), punkt = V(), hebel = V(), vPunkt = V(), normale = V(), linVorher = V();
+const pos = V(), lin = V(), ang = V(), punkt = V(), hebel = V(), vPunkt = V(), normale = V(), linVorher = V(), linStep = V();
+let fuehrung = null;   // Mittellinie des Loopings, wenn das Auto gerade darin fährt
+
+// Spurführung im Looping: Die Fahrbahn gibt Lage und Richtung des Autos vor.
+// Die Bewegung in die Fahrbahn hinein wird umgelenkt (wie die Kraft der Bahn auf das Auto).
+// Bewegt sich das Auto von der Bahn weg (oben zu langsam), greift nichts – es fällt herunter.
+const fMat = new THREE.Matrix4(), fQuat = new THREE.Quaternion(), fFehler = new THREE.Quaternion();
+function spurfuehrung(pkt, dt) {
+  let bi = 0, bd = Infinity;
+  for (let i = 0; i < pkt.length; i++) { const d = pkt[i].p.distanceToSquared(pos); if (d < bd) { bd = d; bi = i; } }
+  const q = pkt[bi], nach = pkt[Math.min(pkt.length - 1, bi + 1)], vor = pkt[Math.max(0, bi - 1)];
+  const abstand = pos.clone().sub(q.p).dot(q.n);              // Höhe über der Fahrbahn
+  if (abstand < -1 || abstand > 2.5) return false;            // schon abgefallen
+  const hinein = lin.dot(q.n);
+  if (hinein < 0) lin.addScaledVector(q.n, -hinein);
+  if (abstand > 1.2 && hinein > 0) return false;              // löst sich gerade
+  const ruhe = P.FEDER_LAENGE + P.RAD_RADIUS - P.FEDER_RUHE;  // richtige Höhe über der Fahrbahn
+  if (abstand < ruhe) lin.addScaledVector(q.n, (ruhe - abstand) * 10);
+  // Soll-Lage: Fahrtrichtung entlang der Bahn, leicht zur Mitte hin
+  const abweichung = pos.clone().sub(q.p).dot(q.r);
+  const richtung = q.tan.clone().addScaledVector(q.r, -abweichung * 0.06).normalize();
+  const seiteSoll = V().crossVectors(q.n, richtung).normalize();
+  const obenSoll = V().crossVectors(richtung, seiteSoll);
+  fQuat.setFromRotationMatrix(fMat.makeBasis(seiteSoll, obenSoll, richtung));
+  fFehler.copy(fQuat).multiply(quat.clone().invert());
+  if (fFehler.w < 0) { fFehler.x *= -1; fFehler.y *= -1; fFehler.z *= -1; fFehler.w *= -1; }
+  const winkel = 2 * Math.acos(Math.min(1, fFehler.w)), s = Math.sqrt(Math.max(1e-9, 1 - fFehler.w * fFehler.w));
+  // Drehung, die die Bahn an dieser Stelle selbst macht (vorausschauend), plus Korrektur der Abweichung
+  const ds = nach.p.distanceTo(vor.p) || 1;
+  const bahnDreh = V().crossVectors(vor.tan, nach.tan).multiplyScalar(lin.dot(q.tan) / ds);
+  ang.copy(bahnDreh).add(V(fFehler.x / s, fFehler.y / s, fFehler.z / s).multiplyScalar(winkel * 15));
+  return true;
+}
 
 function maxEinschlag(tempo) {
   tempo = Math.abs(tempo);
@@ -458,6 +636,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   // 1) Vier Federn: Strahl von jedem Aufhängepunkt nach unten
   let kontakte = 0;
   normale.set(0, 0, 0);
+  fuehrung = null;
   linVorher.copy(lin);   // Geschwindigkeit, bevor die Federn drücken
   const maxL = P.FEDER_LAENGE + P.RAD_RADIUS;
   for (const rad of RAEDER) {
@@ -473,6 +652,8 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     if (einfederung <= 0) continue;
     rad.abstand = d; rad.kontakt = true; kontakte++;
     normale.x += treffer.normal.x; normale.y += treffer.normal.y; normale.z += treffer.normal.z;
+    const h = treffer.collider ? treffer.collider.handle : treffer.colliderHandle;
+    if (fuehrungNach.has(h)) fuehrung = fuehrungNach.get(h);
     hebel.subVectors(punkt, pos);
     vPunkt.crossVectors(ang, hebel).add(lin);
     const kraft = Math.max(0, FEDER_K * einfederung - FEDER_C * vPunkt.dot(oben));
@@ -525,8 +706,13 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
       if (w > 0) ang.multiplyScalar(Math.max(0, w - P.LUFTBREMSE * dt) / w);
     }
   }
+  // Looping: Spurführung bleibt kurz aktiv, auch wenn die Räder einen Moment den Kontakt verlieren
+  if (fuehrung) { zustand.fuehrungBahn = fuehrung; zustand.fuehrungZeit = 0.3; }
+  else zustand.fuehrungZeit = Math.max(0, (zustand.fuehrungZeit || 0) - dt);
+  if (zustand.fuehrungZeit > 0 && zustand.fuehrungBahn && !spurfuehrung(zustand.fuehrungBahn, dt)) zustand.fuehrungZeit = 0;
   autoKoerper.setLinvel(lin, true);
   autoKoerper.setAngvel(ang, true);
+  linStep.copy(lin);     // Geschwindigkeit direkt vor dem Physik-Schritt (für die Wand-Regeln)
 
   welt.step(ereignisse);
 
@@ -536,42 +722,51 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     const w = wandNach.get(h1) || wandNach.get(h2);
     if (beginnt && w) { anWand = true; wand = w; }
   });
-  for (const w of wandCollider) for (const c of [autoCollider, kabinenCollider]) {
-    welt.contactPair(c, w, (manifold) => { if (manifold.numContacts() > 0) { anWand = true; wand = wand || w; } });
+  for (const c of [autoCollider, kabinenCollider]) {
+    welt.contactPairsWith(c, anderer => {
+      const w = wandNach.get(anderer.handle);
+      if (w) welt.contactPair(c, anderer, (manifold) => { if (manifold.numContacts() > 0) { anWand = true; wand = wand || w; } });
+    });
   }
   if (anWand) {
-    // Kippschutz: eine Wand darf das Auto nicht um die Längs- oder Querachse drehen
-    // und nicht an ihr hochklettern lassen – nur die Drehung um die Hochachse bleibt.
+    // Kippschutz: eine Wand darf das Auto nicht um seine Längsachse rollen
+    // und auf ebener Fahrbahn nicht hochklettern lassen.
     const av3 = autoKoerper.angvel(), lv3 = autoKoerper.linvel();
-    autoKoerper.setAngvel({ x: 0, y: av3.y, z: 0 }, true);
-    if (lv3.y > 0) autoKoerper.setLinvel({ x: lv3.x, y: 0, z: lv3.z }, true);
+    ang.set(av3.x, av3.y, av3.z).addScaledVector(vorn, -ang.dot(vorn));
+    if (oben.y > 0.9) ang.addScaledVector(seite, -ang.dot(seite));
+    autoKoerper.setAngvel(ang, true);
+    if (oben.y > 0.9 && lv3.y > 0) autoKoerper.setLinvel({ x: lv3.x, y: 0, z: lv3.z }, true);
   }
   zustand.trefferZahl = (zustand.trefferZahl || 0);
   zustand.wandPause = Math.max(0, zustand.wandPause - dt);
   // Sonderregeln nur beim Vorwärtsfahren – rückwärts regelt die Physik allein (sonst Endlosschleife an der Wand)
-  if (anWand && wand && !zustand.wandVorher && zustand.wandPause === 0 && vf > 5) {
-    zustand.trefferZahl++;
+  // (Die Physik meldet Kontakt schon kurz vor dem Aufprall – gezählt wird erst, wenn die Wand wirklich bremst.)
+  if (anWand && zustand.wandPause > 0) zustand.wandPause = 0.4;   // Schrammen zählt nur einmal
+  if (anWand && wand && zustand.wandPause === 0 && vf > 5) {
+    // Richtung der Wand: Die Physik hat beim Aufprall genau den Teil der Bewegung entfernt,
+    // der in die Wand hineinging – daraus ergibt sich, wohin die Wand zeigt (klappt auch bei Kurven).
     const lv3 = autoKoerper.linvel();
-    const n = wand.wandNormale;
-    // Aufprallwinkel: wie direkt fährt das Auto auf die Wand zu? (vorn = Richtung vor dem Treffer)
-    const hx = vorn.x, hz = vorn.z, hl = Math.hypot(hx, hz) || 1;
-    const direkt = Math.abs(hx * n.x + hz * n.z) / hl;
-    if (direkt > 0.5) {
-      // frontal (steiler als 30°): Rückprall mit 11 % des Tempos
-      const r = -P.WAND_RUECKPRALL * vf / 3.6;
-      autoKoerper.setLinvel({ x: hx / hl * r, y: lv3.y, z: hz / hl * r }, true);
-    } else {
-      // streifend: entlang der Wand weiter mit 42 % des Tempos, Auto richtet sich parallel aus
-      let tx = -n.z, tz = n.x;
-      if (tx * hx + tz * hz < 0) { tx = -tx; tz = -tz; }
-      const v = P.WAND_STREIF * Math.abs(vf) / 3.6;
-      autoKoerper.setLinvel({ x: tx * v, y: lv3.y, z: tz * v }, true);
-      let diff = Math.atan2(tx, tz) - Math.atan2(hx, hz);
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      zustand.ausrichten = { rate: diff / 0.15, zeit: 0.15 };
+    const nachher = V(lv3.x, lv3.y, lv3.z);
+    const stoss = nachher.clone().sub(linStep); stoss.addScaledVector(oben, -stoss.dot(oben));
+    const richtung = linStep.clone(); richtung.addScaledVector(oben, -richtung.dot(oben));
+    const tempo = richtung.length();
+    if (stoss.length() > 0.3 && tempo > 1) {
+      zustand.trefferZahl++;
+      zustand.wandPause = 0.4;
+      const n = stoss.normalize(); richtung.normalize();
+      const hoch = oben.clone().multiplyScalar(nachher.dot(oben));
+      if (Math.abs(richtung.dot(n)) > 0.5) {
+        // frontal (steiler als 30°): Rückprall mit 11 % des Tempos
+        autoKoerper.setLinvel(richtung.clone().multiplyScalar(-P.WAND_RUECKPRALL * tempo).add(hoch), true);
+      } else {
+        // streifend: entlang der Wand weiter mit 42 % des Tempos, Auto richtet sich parallel aus
+        const entlang = richtung.clone().addScaledVector(n, -richtung.dot(n)).normalize();
+        autoKoerper.setLinvel(entlang.clone().multiplyScalar(P.WAND_STREIF * tempo).add(hoch), true);
+        const diff = Math.atan2(V().crossVectors(vorn, entlang).dot(oben), vorn.dot(entlang));
+        zustand.ausrichten = { rate: diff / 0.15, zeit: 0.15 };
+      }
     }
   }
-  if (anWand) zustand.wandPause = 0.4; // neuer Treffer erst nach 0,4 s ohne Wandkontakt
   zustand.wandVorher = anWand;
 
   // Weltrand
@@ -625,29 +820,29 @@ function messen(dt, gas, bremse, lenkt, vf) {
 }
 
 // ---------- Kamera ----------
-let kamYaw = 0;
-const kamPos = V(), blick = V();
+// Die Kamera folgt der Lage des Autos (auch kopfüber im Looping), weich nachgezogen.
+// In der Luft behält sie ihre Lage, damit sie bei Sprüngen ruhig bleibt.
+const kamPos = V(), blick = V(), kamVorn = V(), kamOben = V();
+const kamQuat = new THREE.Quaternion(), kamZiel = new THREE.Quaternion();
 function kameraNachfuehren(dt) {
   const t = autoKoerper.translation(), r = autoKoerper.rotation();
   quat.set(r.x, r.y, r.z, r.w);
   vorn.set(0, 0, 1).applyQuaternion(quat);
-  if (Math.hypot(vorn.x, vorn.z) > 0.2) {
-    const autoYaw = Math.atan2(vorn.x, vorn.z);
-    let diff = autoYaw - kamYaw;
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-    kamYaw += diff * (1 - Math.exp(-dt * 6));
-  }
-  const fx = Math.sin(kamYaw), fz = Math.cos(kamYaw);
+  oben.set(0, 1, 0).applyQuaternion(quat);
+  if (zustand.kontakte >= 2) kamZiel.copy(quat);
+  const imLooping = zustand.fuehrungZeit > 0;     // im Looping dreht sich alles schnell – Kamera folgt enger
+  kamQuat.slerp(kamZiel, 1 - Math.exp(-dt * (imLooping ? 20 : 5)));
+  kamVorn.set(0, 0, 1).applyQuaternion(kamQuat);
+  kamOben.set(0, 1, 0).applyQuaternion(kamQuat);
   if (cockpit) {
-    oben.set(0, 1, 0).applyQuaternion(quat);
     camera.position.set(t.x, t.y, t.z).addScaledVector(oben, 0.7).addScaledVector(vorn, 0.2);
     blick.set(t.x, t.y, t.z).addScaledVector(vorn, 20).addScaledVector(oben, 0.4);
     camera.up.copy(oben);
   } else {
-    kamPos.set(t.x - fx * 7.5, t.y + 2.6, t.z - fz * 7.5);
+    kamPos.set(t.x, t.y, t.z).addScaledVector(kamVorn, -7.5).addScaledVector(kamOben, 2.6);
     camera.position.lerp(kamPos, 1 - Math.exp(-dt * 12));
-    blick.set(t.x + fx * 4, t.y + 0.4, t.z + fz * 4);
-    camera.up.set(0, 1, 0);
+    blick.set(t.x, t.y, t.z).addScaledVector(kamVorn, 4).addScaledVector(kamOben, 0.4);
+    camera.up.copy(kamOben);
   }
   camera.lookAt(blick);
   const v = autoKoerper.linvel();
@@ -711,7 +906,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 // Zum Testen am PC (Konsole): Zugriff auf Auto und Werte
-window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung };
+window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken };
 </script>
 <script>
   addEventListener('error', e => {
