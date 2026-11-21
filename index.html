@@ -423,7 +423,7 @@ function kameraUmschalten() { cockpit = !cockpit; }
 
 // ---------- Fahrphysik ----------
 const quat = new THREE.Quaternion(), oben = V(), vorn = V(), seite = V();
-const pos = V(), lin = V(), ang = V(), punkt = V(), hebel = V(), vPunkt = V(), normale = V();
+const pos = V(), lin = V(), ang = V(), punkt = V(), hebel = V(), vPunkt = V(), normale = V(), linVorher = V();
 
 function maxEinschlag(tempo) {
   tempo = Math.abs(tempo);
@@ -458,6 +458,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   // 1) Vier Federn: Strahl von jedem Aufhängepunkt nach unten
   let kontakte = 0;
   normale.set(0, 0, 0);
+  linVorher.copy(lin);   // Geschwindigkeit, bevor die Federn drücken
   const maxL = P.FEDER_LAENGE + P.RAD_RADIUS;
   for (const rad of RAEDER) {
     punkt.copy(rad.lokal).applyQuaternion(quat).add(pos);
@@ -491,12 +492,14 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   if (kontakte > 0) {
     // 2) Am Boden: Antrieb/Bremse/Widerstand, seitlicher Grip, Drehung aus der Lenkung
     const g = Math.min(1, kontakte / 2);
-    // Bodenhaftung: Die Federn dürfen das Auto nur langsam von der Fahrbahn wegdrücken.
-    // So folgt das Auto Rampen, ohne am Rampenanfang hochgeschleudert zu werden.
+    // Bodenhaftung: Die Federn dürfen das Auto nur langsam von der Fahrbahn wegdrücken
+    // (sonst Katapult am Rampenanfang). Schwung, den das Auto schon vorher hatte – z. B. bergauf
+    // an einer Kuppe – bleibt erhalten, damit es dort abheben kann.
     if (kontakte >= 3) {
       normale.normalize();
       const weg = lin.dot(normale);
-      if (weg > P.BODENHAFTUNG) lin.addScaledVector(normale, P.BODENHAFTUNG - weg);
+      const grenze = Math.max(linVorher.dot(normale), P.BODENHAFTUNG);
+      if (weg > grenze) lin.addScaledVector(normale, grenze - weg);
     }
     const vfNeu = neuesTempo(vf, gas, bremse, dt);
     lin.addScaledVector(vorn, (vfNeu - vf) / 3.6 * g);
