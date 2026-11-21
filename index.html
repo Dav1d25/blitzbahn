@@ -38,6 +38,34 @@
   .feld small { display: block; font-size: 11px; opacity: 0.7; letter-spacing: 0.08em; }
   .feld b { font-size: 26px; font-weight: 700; }
   #pause { pointer-events: auto; }
+  .feld.neben b { font-size: 19px; }
+  #diff.schneller { color: #5ee08a; } #diff.langsamer { color: #ff6b5b; }
+  #kpFeld.blitz { background: rgba(34, 195, 214, 0.9); transition: none; }
+  #kpFeld { transition: background 0.6s; }
+
+  /* Meldung am Kontrollpunkt */
+  #meldung {
+    position: fixed; left: 50%; top: 22%; transform: translateX(-50%); pointer-events: none;
+    background: rgba(15, 30, 60, 0.8); color: #fff; padding: 8px 18px; border-radius: 12px;
+    font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; opacity: 0; transition: opacity 0.4s;
+  }
+  #meldung.zeigen { opacity: 1; transition: none; }
+  #meldung .schneller { color: #5ee08a; } #meldung .langsamer { color: #ff6b5b; }
+
+  /* Ziel-Einblendung */
+  #zielbild {
+    position: fixed; left: 0; right: 0; top: 30%; display: none; flex-direction: column; align-items: center;
+    gap: 8px; pointer-events: none; z-index: 4; color: #fff; text-align: center;
+  }
+  #zielbild .band {
+    width: 100%; background: linear-gradient(90deg, rgba(19,38,74,0) 0%, rgba(19,38,74,0.88) 20%, rgba(19,38,74,0.88) 80%, rgba(19,38,74,0) 100%);
+    padding: 6px 0; font-size: 26px; font-weight: 700; letter-spacing: 0.04em;
+  }
+  #zielbild .band.gross { font-size: 56px; font-variant-numeric: tabular-nums; border-top: 3px solid #ff8a1f; border-bottom: 3px solid #ff8a1f; }
+  #zielRekord { font-size: 34px; font-weight: 800; color: #ffc35a; text-shadow: 0 2px 6px rgba(0,0,0,0.5); }
+  #zielDiff { font-size: 22px; font-weight: 700; text-shadow: 0 1px 4px rgba(0,0,0,0.7); }
+  #zielDiff.schneller { color: #5ee08a; } #zielDiff.langsamer { color: #ff6b5b; }
+  #zielInfo { font-size: 18px; background: rgba(15,30,60,0.75); padding: 6px 14px; border-radius: 10px; margin-top: 6px; }
 
   /* Messanzeige (Testgelände) */
   #mess {
@@ -101,9 +129,24 @@
 <body>
 
 <div id="hud">
+  <div class="feld" id="kpFeld"><small>TORE</small><b id="kp">0/0</b></div>
+  <div class="feld neben"><small>BESTZEIT</small><b id="best">–</b></div>
   <div class="feld"><small>ZEIT</small><b id="zeit">00:00.000</b></div>
   <div id="pause" class="knopf" title="Pause (P)">❚❚</div>
+  <div class="feld neben"><small>DIFFERENZ</small><b id="diff">–</b></div>
   <div class="feld"><small>KM/H</small><b id="tempo">0</b></div>
+</div>
+
+<!-- Kurze Meldung am Kontrollpunkt -->
+<div id="meldung"></div>
+
+<!-- Ziel-Einblendung: liegt über dem weiterlaufenden Spiel -->
+<div id="zielbild">
+  <div id="zielRekord">★ Neue Bestzeit ★</div>
+  <div class="band" id="zielName">Teile-Parcours</div>
+  <div class="band gross" id="zielZeit">00:00.000</div>
+  <div id="zielDiff"></div>
+  <div id="zielInfo">Tippe ↺ für einen neuen Versuch</div>
 </div>
 
 <div id="mess">
@@ -115,16 +158,16 @@
 </div>
 
 <div id="kamera" class="knopf klein" title="Kamera (C)">🎥</div>
-<div id="reset"  class="knopf klein" title="Zurück zum Start (R)">↺</div>
+<div id="reset"  class="knopf klein" title="1× = letztes Tor (R) · 2× = Neustart (T)">↺</div>
 <div id="gas"    class="knopf" data-halten="gas">▲</div>
 <div id="bremse" class="knopf" data-halten="bremse">▼</div>
 <div id="beide" data-halten="beide" title="Gas + Bremse"></div>
 <div id="links"  class="knopf" data-halten="links">◀</div>
 <div id="rechts" class="knopf" data-halten="rechts">▶</div>
 
-<div id="hinweis">▲ halten = Gas &nbsp;·&nbsp; ▼ = Bremse/Rückwärts &nbsp;·&nbsp; ◀ ▶ = Lenken<br>
-  <small>▼ beim Lenken = enger einlenken (Drift) · Daumen auf die Kante zwischen ▲ und ▼ = Gas + Bremse<br>
-  Looping ab ca. 130 km/h · in der Luft ▼ = Luftbremse<br>Am PC: W A S D oder Pfeiltasten, R = Reset</small></div>
+<div id="hinweis">Fahr durch alle <b style="color:#22c3d6">türkisen Tore</b> und dann ins Ziel – die Uhr startet mit dem ersten Gas.<br>
+  <small>▲ Gas · ▼ Bremse/Rückwärts · ◀ ▶ Lenken · ▼ beim Lenken = Drift · Kante zwischen ▲ und ▼ = Gas + Bremse<br>
+  ↺ 1× = zurück zum letzten Tor · ↺ 2× schnell = Neustart<br>Am PC: W A S D / Pfeiltasten, R = letztes Tor, T = Neustart</small></div>
 <div id="pausiert">Pause<small>Irgendwo tippen zum Weiterfahren</small></div>
 <div id="laden">Lädt …</div>
 <div id="quer">Bitte das iPad quer halten 🔄</div>
@@ -328,6 +371,7 @@ class Netz {
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }));
     mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+    this.mesh = mesh;
     const idx = new Uint32Array(this.pos.length / 3).map((_, i) => i);
     const c = welt.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array(this.pos), idx)
       .setFriction(istWand ? 0.1 : 0.5), fest);
@@ -436,7 +480,8 @@ function baueTeil(t, start, yaw) {
     quader(q.p.clone().addScaledVector(q.n, 6.5), 2 * w + 2.8, 1.6, 0.5, farbe);
     const lm = linie.fertig(false); welt.removeCollider(lm, false);
     const tm = tor.fertig(false); welt.removeCollider(tm, false);
-    marken.push({ typ: t.marke, pos: q.p.clone(), tan: q.tan.clone(), r: q.r.clone(), breite: 2 * w });
+    marken.push({ typ: t.marke, pos: q.p.clone(), tan: q.tan.clone(), r: q.r.clone(), n: q.n.clone(), breite: 2 * w,
+                  tor: tor.mesh, linie: linie.mesh });
   }
 }
 
@@ -621,6 +666,121 @@ function zuruecksetzen() {
   messung.null100 = null; messung.brems = null;
   for (const rad of RAEDER) { rad.rutschZeit = 0; rad.spurt = false; }
   spurenLoeschen();                                   // Zurücksetzen löscht alle Spuren und den Rauch
+  rennenNeu();
+}
+
+// =====================================================================
+//  RENNREGELN (Schritt 4, Spezifikation 3.1 und 3.3)
+//  Tore (Kontrollpunkte) der Reihe nach durchfahren, dann zählt das Ziel.
+//  Uhr in Millisekunden, startet mit dem ersten Gas oder Bremsen.
+//  Zurücksetzen: 1× = zum letzten Tor (Uhr läuft weiter), 2× = Neustart.
+// =====================================================================
+const STRECKEN_NAME = 'Teile-Parcours';
+const tore = marken.filter(m => m.typ === 'kontrollpunkt');
+const zielMarke = marken.find(m => m.typ === 'ziel');
+const rennen = { naechstesTor: 0, torZeiten: [], fertig: false, endzeit: 0, letztesTor: null, meldungBis: 0 };
+
+// Bestzeit im Speicher von Safari (bleibt nach dem Schließen erhalten)
+const SPEICHER = 'blitzbahn.bestzeit.' + STRECKEN_NAME;
+function bestzeitLaden() {
+  try { const d = JSON.parse(localStorage.getItem(SPEICHER)); return d && typeof d.zeit === 'number' ? d : null; }
+  catch { return null; }
+}
+function bestzeitSpeichern(zeit, torZeiten) {
+  try { localStorage.setItem(SPEICHER, JSON.stringify({ zeit, torZeiten, datum: Date.now() })); } catch { /* privat: dann eben nicht */ }
+}
+let bestzeit = bestzeitLaden();
+
+function torFaerben(m, geschafft) {
+  if (m.tor) m.tor.material.color.set(geschafft ? 0x7dffa0 : 0xffffff);   // eingesammelt = grünlich
+}
+function rennenNeu() {
+  Object.assign(rennen, { naechstesTor: 0, torZeiten: [], fertig: false, endzeit: 0, letztesTor: null });
+  for (const m of tore) torFaerben(m, false);
+  document.getElementById('zielbild').style.display = 'none';
+  diffZeigen(null);
+}
+
+// Zum letzten Tor zurück (Uhr läuft weiter). Noch kein Tor oder schon im Ziel → Neustart.
+function zumLetztenTor() {
+  const m = rennen.letztesTor;
+  if (!m || rennen.fertig) { zuruecksetzen(); return; }
+  const hoehe = P.FEDER_LAENGE + P.RAD_RADIUS - P.FEDER_RUHE + 0.01;
+  const yaw = Math.atan2(m.tan.x, m.tan.z);
+  const rot = new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), yaw);
+  autoKoerper.setTranslation(m.pos.clone().addScaledVector(m.n, hoehe), true);
+  autoKoerper.setRotation(rot, true);
+  autoKoerper.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  autoKoerper.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  Object.assign(zustand, { lenk: 0, ausrichten: null, fuehrungZeit: 0, fuehrungBahn: null, wandPause: 0, wandVorher: false });
+  kamZiel.copy(rot); kamQuat.copy(rot);
+  for (const rad of RAEDER) { rad.rutschZeit = 0; rad.spurt = false; }
+  spurenLoeschen();
+}
+// ↺-Knopf: 1× = letztes Tor, ein zweites Mal innerhalb von 0,4 s = Neustart
+let letzterResetTipp = -1e9;
+function resetGetippt() {
+  const jetzt = performance.now();
+  if (jetzt - letzterResetTipp < 400) zuruecksetzen(); else zumLetztenTor();
+  letzterResetTipp = jetzt;
+}
+
+// Fährt das Auto in diesem Schritt durch die Linie von Marke m? Liefert den Anteil des Schritts (0…1) oder -1.
+function durchfahren(m, vorher, nachher) {
+  const a = vorher.clone().sub(m.pos), b = nachher.clone().sub(m.pos);
+  const da = a.dot(m.tan), db = b.dot(m.tan);
+  if (!(da < 0 && db >= 0)) return -1;
+  if (Math.abs(b.dot(m.r)) > m.breite / 2 + 1.5 || Math.abs(b.dot(m.n)) > 8) return -1;
+  return da / (da - db);
+}
+
+// Wird nach jedem Physik-Schritt aufgerufen (genau, unabhängig von der Bildrate)
+function rennregeln(vorher, nachher, dt) {
+  if (rennen.fertig || !zustand.laeuft) return;
+  if (rennen.naechstesTor < tore.length) {
+    const m = tore[rennen.naechstesTor], anteil = durchfahren(m, vorher, nachher);
+    if (anteil >= 0) {
+      const t = zustand.zeit + anteil * dt, i = rennen.naechstesTor;
+      rennen.torZeiten.push(t); rennen.naechstesTor++; rennen.letztesTor = m;
+      torFaerben(m, true);
+      const vergleich = bestzeit && bestzeit.torZeiten && bestzeit.torZeiten[i] != null ? t - bestzeit.torZeiten[i] : null;
+      diffZeigen(vergleich);
+      meldungZeigen(`Tor ${i + 1}/${tore.length}  ` + (vergleich == null ? zeitText(t) : diffSpan(vergleich)));
+      const f = document.getElementById('kpFeld'); f.classList.add('blitz'); setTimeout(() => f.classList.remove('blitz'), 120);
+    }
+  } else if (zielMarke) {
+    const anteil = durchfahren(zielMarke, vorher, nachher);
+    if (anteil >= 0) zielErreicht(zustand.zeit + anteil * dt);
+  }
+}
+
+function zielErreicht(t) {
+  rennen.fertig = true; rennen.endzeit = t; zustand.zeit = t;     // Uhr bleibt bei der Endzeit stehen
+  const alt = bestzeit;
+  const neu = !alt || t < alt.zeit;
+  if (neu) { bestzeitSpeichern(t, rennen.torZeiten.slice()); bestzeit = bestzeitLaden() || { zeit: t, torZeiten: rennen.torZeiten.slice() }; }
+  document.getElementById('zielName').textContent = STRECKEN_NAME;
+  document.getElementById('zielZeit').textContent = zeitText(t);
+  document.getElementById('zielRekord').style.display = neu ? 'block' : 'none';
+  const zd = document.getElementById('zielDiff');
+  if (alt) { const d = t - alt.zeit; zd.innerHTML = (d < 0 ? 'schneller als die alte Bestzeit: ' : 'langsamer als die Bestzeit: ') + diffText(d); zd.className = d < 0 ? 'schneller' : 'langsamer'; }
+  else { zd.textContent = 'Erste Zeit auf dieser Strecke!'; zd.className = ''; }
+  diffZeigen(alt ? t - alt.zeit : null);
+  document.getElementById('zielbild').style.display = 'flex';
+}
+
+// Anzeige-Hilfen
+function diffText(d) { return (d < 0 ? '−' : '+') + (Math.abs(d)).toFixed(3).replace('.', ','); }
+function diffSpan(d) { return `<span class="${d < 0 ? 'schneller' : 'langsamer'}">${diffText(d)}</span>`; }
+function diffZeigen(d) {
+  const el = document.getElementById('diff');
+  if (d == null) { el.textContent = '–'; el.className = ''; return; }
+  el.textContent = diffText(d); el.className = d < 0 ? 'schneller' : 'langsamer';
+}
+function meldungZeigen(html) {
+  const el = document.getElementById('meldung');
+  el.innerHTML = html; el.classList.add('zeigen');
+  clearTimeout(meldungZeigen.t); meldungZeigen.t = setTimeout(() => el.classList.remove('zeigen'), 1600);
 }
 
 // ---------- Eingabe: Tastatur ----------
@@ -632,7 +792,8 @@ const TASTEN = {
 addEventListener('keydown', e => {
   if (e.repeat) return;
   tasten.add(e.code);
-  if (['KeyR', 'KeyT', 'Enter', 'Backspace'].includes(e.code)) zuruecksetzen();
+  if (e.code === 'KeyR' || e.code === 'Enter') zumLetztenTor();       // R = zum letzten Tor
+  if (e.code === 'KeyT' || e.code === 'Backspace') zuruecksetzen();   // T = Neustart
   if (e.code === 'KeyP' || e.code === 'Space') pauseUmschalten();
   if (e.code === 'KeyC') kameraUmschalten();
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -663,7 +824,7 @@ function gedrueckt(aktion) {
   return TASTEN[aktion].some(c => tasten.has(c));
 }
 const tipp = (id, fn) => document.getElementById(id).addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
-tipp('reset', zuruecksetzen);
+tipp('reset', resetGetippt);
 tipp('pause', pauseUmschalten);
 tipp('pausiert', pauseUmschalten);
 tipp('kamera', kameraUmschalten);
@@ -1002,7 +1163,10 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     rad.spurt = rad.rutschZeit >= P.SPUR_VERZOEGERUNG;
   }
 
-  if (zustand.laeuft) zustand.zeit += dt;
+  // Tore und Ziel prüfen (Position vor und nach diesem Schritt), dann die Uhr weiterzählen
+  const nachSchritt = autoKoerper.translation();
+  rennregeln(pos, V(nachSchritt.x, nachSchritt.y, nachSchritt.z), dt);
+  if (zustand.laeuft && !rennen.fertig) zustand.zeit += dt;
   messen(dt, gas, bremse, links || rechts, vf);
 }
 
@@ -1073,7 +1237,7 @@ function kameraNachfuehren(dt) {
 }
 
 // ---------- Anzeige ----------
-const zeitEl = el('zeit'), tempoEl = el('tempo'), hinweis = el('hinweis');
+const zeitEl = el('zeit'), tempoEl = el('tempo'), hinweis = el('hinweis'), kpEl = el('kp'), bestEl = el('best');
 function zeitText(t) {
   const ms = Math.floor(t * 1000);
   const min = Math.floor(ms / 60000), sek = Math.floor(ms / 1000) % 60;
@@ -1115,6 +1279,8 @@ function bild(jetzt) {
   kameraNachfuehren(dt);
 
   zeitEl.textContent = zeitText(zustand.zeit);
+  kpEl.textContent = `${rennen.naechstesTor}/${tore.length}`;
+  bestEl.textContent = bestzeit ? zeitText(bestzeit.zeit) : '–';
   tempoEl.textContent = Math.round(Math.hypot(lv.x, lv.y, lv.z) * 3.6);
   hinweis.style.opacity = zustand.laeuft ? 0 : 1;
   for (const k of haltKnoepfe) k.classList.toggle('an', gedrueckt(k.dataset.halten));
@@ -1131,7 +1297,9 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 // Zum Testen am PC (Konsole): Zugriff auf Auto und Werte
-window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken, saeulen, welt, RAEDER, wandNach };
+window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken, saeulen, welt, RAEDER, wandNach,
+                 rennen, tore, zumLetztenTor, resetGetippt, get bestzeit() { return bestzeit; },
+                 bestzeitLoeschen() { try { localStorage.removeItem(SPEICHER); } catch {} bestzeit = null; } };
 </script>
 <script>
   addEventListener('error', e => {
