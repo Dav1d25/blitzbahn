@@ -60,6 +60,9 @@
   .klein { width: calc(var(--gross) * 0.72); height: calc(var(--gross) * 0.72); font-size: calc(var(--gross) * 0.32); }
   #gas    { left: var(--rand-l); bottom: calc(var(--rand-u) + var(--gross) + 12px); }
   #bremse { left: var(--rand-l); bottom: var(--rand-u); }
+  /* Daumen auf der Kante zwischen ▲ und ▼ = Gas und Bremse gleichzeitig */
+  #beide  { position: fixed; left: var(--rand-l); width: var(--gross); height: 36px; z-index: 2;
+            bottom: calc(var(--rand-u) + var(--gross) + 6px - 18px); }
   #links  { right: calc(var(--rand-r) + var(--gross) + 12px); bottom: var(--rand-u); }
   #rechts { right: var(--rand-r); bottom: var(--rand-u); }
   #kamera { left: var(--rand-l); top: var(--rand-o); }
@@ -115,11 +118,13 @@
 <div id="reset"  class="knopf klein" title="Zurück zum Start (R)">↺</div>
 <div id="gas"    class="knopf" data-halten="gas">▲</div>
 <div id="bremse" class="knopf" data-halten="bremse">▼</div>
+<div id="beide" data-halten="beide" title="Gas + Bremse"></div>
 <div id="links"  class="knopf" data-halten="links">◀</div>
 <div id="rechts" class="knopf" data-halten="rechts">▶</div>
 
 <div id="hinweis">▲ halten = Gas &nbsp;·&nbsp; ▼ = Bremse/Rückwärts &nbsp;·&nbsp; ◀ ▶ = Lenken<br>
-  <small>Teile-Parcours: alle Bauteile hintereinander · Looping ab ca. 130 km/h · in der Luft ▼ = Luftbremse<br>Am PC: W A S D oder Pfeiltasten, R = Reset</small></div>
+  <small>▼ beim Lenken = enger einlenken (Drift) · Daumen auf die Kante zwischen ▲ und ▼ = Gas + Bremse<br>
+  Looping ab ca. 130 km/h · in der Luft ▼ = Luftbremse<br>Am PC: W A S D oder Pfeiltasten, R = Reset</small></div>
 <div id="pausiert">Pause<small>Irgendwo tippen zum Weiterfahren</small></div>
 <div id="laden">Lädt …</div>
 <div id="quer">Bitte das iPad quer halten 🔄</div>
@@ -145,12 +150,29 @@ const P = {
   LENK_KNICK: 45,
   LENK_EXP: 1.4,          // Einschlag = 0,41 × (45 / Tempo)^1,4
   LENK_RATE: 4,           // rad pro Sekunde Ein-/Auslenken
-  RADSTAND: 2.6,          // ergibt ca. 25 m Kurvenradius bei 100 km/h
-  DREH_MAX: 66,           // °/s – schneller dreht das Auto nie (gemessen: 60–70 °/s bei 30–150 km/h)
+  RADSTAND: 2.6,          // für langsames Lenken (Rangieren)
+  DREH_MAX: 66,           // °/s – schneller dreht das Auto ohne Bremse nie
+  DREH_100: 65,           // °/s bei 100 km/h; darüber langsamer: Drehrate = 65 × (100 / Tempo)^0,6
+  DREH_EXP: 0.6,          //   → ca. 49 °/s bei 160 km/h, ca. 39 °/s bei 230 km/h (gemessen 37)
+  // Bremsen und Driften (Abschnitt 3.3 „Bremsen, Driften und Bremsspuren“)
+  // Dreh-Faktoren (abgestimmt mit dem Messprogramm, weil das Tempo während des Manövers sinkt)
+  DREH_NUR_LENKEN: 1.05,  // ohne Gas dreht das Auto etwas stärker (Soll 56 statt 49 °/s)
+  DREH_GAS_BREMSE: 1.2,   // Gas + Bremse + Lenken (Soll 67 statt 49 °/s)
+  DREH_BREMSE_138: 1.2,   // Bremse + Lenken (Soll 72 statt 49 °/s ab 138 km/h …
+  DREH_BREMSE_218: 1.6,   // … und 64 statt 37 °/s ab 218 km/h)
+  ANTRIEB_LENKEN: 0.8,    // beim Lenken zieht der Motor nur 80 % (+42 statt +57 km/h/s ab 138)
+  BREMSE_MIT_GAS: 0.5,    // Gas + Bremse geradeaus: Bremse gewinnt, aber nur halb so stark
+  BREMSE_LENKEN: 80,      // km/h/s – Bremse beim Lenken (+ Widerstand): −94 ab 138, −105 ab 218
+  GAS_BREMSE_LENKEN: 0.19,// × Tempo km/h/s (+ Widerstand): −41 ab 138, −63 ab 218
+  SPUR_TEMPO: 96,         // km/h – ab hier reicht ein Grip unter 0,5 für eine Bremsspur
+  SPUR_VERZOEGERUNG: 0.075, // s – so lange muss ein Rad rutschen, bevor Spur und Rauch beginnen
+  SPUR_STUECKE: 1000,     // so viele Spurstücke merkt sich jedes Rad (danach wird das älteste überschrieben)
+  SPUR_BREITE: 0.34,      // m
+  RAUCH_MAX: 256,         // höchstens so viele Rauchwölkchen gleichzeitig
   BODENHAFTUNG: 1,        // m/s – so schnell dürfen die Federn das Auto höchstens von der Fahrbahn wegdrücken
   STEILKURVE_GRIP: 1.8,   // so viel enger kann man in Steilkurven lenken (mehr Tempo möglich)
   KANTEN_DAEMPFUNG: 30,   // wie stark Kippen gebremst wird, wenn nur 1–2 Räder Bodenkontakt haben
-  GRIP: 15,             // wie schnell seitliches Rutschen abgebaut wird (höher = weniger Drift)
+  GRIP: 24,            // wie schnell seitliches Rutschen abgebaut wird (höher = weniger Drift)
   // Federung
   MASSE: 1000,            // kg
   FEDER_RUHE: 0.079,      // m Einfederung im Stand (gemessen)
@@ -488,7 +510,7 @@ const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.1, 0.4), dunkel);
 spoiler.position.set(0, 0.5, -1.75);
 for (const t of [koerper, kabine, spoiler]) { t.castShadow = true; auto.add(t); }
 const lichtAus = new THREE.MeshBasicMaterial({ color: 0x661111 });
-const lichtAn = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+const lichtAn = new THREE.MeshBasicMaterial({ color: 0xff4a1a });   // rot-orange beim Bremsen
 const ruecklichter = [-0.6, 0.6].map(x => {
   const l = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.05), lichtAus);
   l.position.set(x, 0.1, -1.92); auto.add(l); return l;
@@ -501,7 +523,9 @@ const RAEDER = [[-0.88, 1.3, true], [0.88, 1.3, true], [-0.88, -1.3, false], [0.
     const halter = new THREE.Group(); halter.position.set(x * 0.95 / 0.88, -0.4, z);
     const rad = new THREE.Mesh(radGeo, radMat); rad.castShadow = true;
     halter.add(rad); auto.add(halter);
-    return { lokal: new THREE.Vector3(x, 0, z), vorn, halter, rad, abstand: P.FEDER_LAENGE + P.RAD_RADIUS, kontakt: false };
+    return { lokal: new THREE.Vector3(x * 0.95 / 0.88, 0, z), strahl: new THREE.Vector3(x, 0, z), vorn, halter, rad,
+             abstand: P.FEDER_LAENGE + P.RAD_RADIUS, kontakt: false,
+             boden: new THREE.Vector3(), bodenN: new THREE.Vector3(0, 1, 0), grip: 1, rutschZeit: 0, spurt: false };
   });
 scene.add(auto);
 
@@ -518,6 +542,73 @@ const kabinenCollider = welt.createCollider(RAPIER.ColliderDesc.cuboid(0.65, 0.2
 const ereignisse = new RAPIER.EventQueue(true);
 const wandNach = new Map(wandCollider.map(c => [c.handle, c]));
 
+// ---------- Bremsspuren und Rauch ----------
+// Pro Rad ein schwarzes Band (#111111, 0,34 m breit), das in jedem Bild ein Stück wächst, solange das Rad rutscht.
+// Spuren verblassen nicht; jedes Rad merkt sich die letzten 1000 Stücke.
+class Spur {
+  constructor() {
+    this.daten = new Float32Array(P.SPUR_STUECKE * 6 * 3);
+    this.attr = new THREE.BufferAttribute(this.daten, 3); this.attr.setUsage(THREE.DynamicDrawUsage);
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', this.attr); geo.setDrawRange(0, 0);
+    this.mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: 0x111111, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    this.mesh.frustumCulled = false; scene.add(this.mesh);
+    this.i = 0; this.voll = false; this.letzte = null;
+  }
+  anhaengen(links, rechts) {
+    if (this.letzte) {
+      const [a, b] = this.letzte, o = this.i * 18, d = this.daten;
+      for (const [k, p] of [a, b, rechts, a, rechts, links].entries()) { d[o + k * 3] = p.x; d[o + k * 3 + 1] = p.y; d[o + k * 3 + 2] = p.z; }
+      this.attr.addUpdateRange(o, 18); this.attr.needsUpdate = true;
+      this.i = (this.i + 1) % P.SPUR_STUECKE; if (this.i === 0) this.voll = true;
+      this.mesh.geometry.setDrawRange(0, (this.voll ? P.SPUR_STUECKE : this.i) * 6);
+      this.letzte[0].copy(links); this.letzte[1].copy(rechts);
+    } else this.letzte = [links.clone(), rechts.clone()];
+  }
+  abreissen() { this.letzte = null; }
+  leeren() { this.i = 0; this.voll = false; this.letzte = null; this.mesh.geometry.setDrawRange(0, 0); }
+}
+const spuren = RAEDER.map(() => new Spur());
+
+// Rauch: hellgraue Wölkchen, 30 % deckend, steigen auf und wachsen in 0,5 s von halber auf 1,5-fache Größe
+const rauch = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.5, 0),
+  new THREE.MeshBasicMaterial({ color: 0xe4e4e4, transparent: true, opacity: 0.3, depthWrite: false }), P.RAUCH_MAX);
+rauch.frustumCulled = false; scene.add(rauch);
+const wolken = Array.from({ length: P.RAUCH_MAX }, () => ({ alter: 1, pos: V(), vy: 0 }));
+let naechsteWolke = 0, rauchZufall = 1;
+const rZufall = () => (rauchZufall = (rauchZufall * 16807) % 2147483647) / 2147483647 - 0.5;
+const nullMatrix = new THREE.Matrix4().makeScale(0, 0, 0), wMatrix = new THREE.Matrix4();
+for (let i = 0; i < P.RAUCH_MAX; i++) rauch.setMatrixAt(i, nullMatrix);
+
+const spurL = V(), spurR = V(), quer = V();
+function spurenUndRauch(dt) {
+  for (let k = 0; k < RAEDER.length; k++) {
+    const rad = RAEDER[k];
+    if (!rad.spurt) { spuren[k].abreissen(); continue; }
+    quer.copy(seiteBild).addScaledVector(rad.bodenN, -seiteBild.dot(rad.bodenN)).normalize().multiplyScalar(P.SPUR_BREITE / 2);
+    spurL.copy(rad.boden).addScaledVector(rad.bodenN, 0.02).add(quer);
+    spurR.copy(rad.boden).addScaledVector(rad.bodenN, 0.02).sub(quer);
+    spuren[k].anhaengen(spurL, spurR);
+    const w = wolken[naechsteWolke]; naechsteWolke = (naechsteWolke + 1) % P.RAUCH_MAX;
+    w.alter = 0; w.vy = 0;
+    w.pos.copy(rad.boden).add(V(rZufall() * 0.25, 0.3 + rZufall() * 0.25, rZufall() * 0.25));
+  }
+  for (let i = 0; i < P.RAUCH_MAX; i++) {
+    const w = wolken[i];
+    if (w.alter >= 0.5) { if (w.alter < 1) { rauch.setMatrixAt(i, nullMatrix); w.alter = 1; } continue; }
+    w.alter += dt; w.vy += 15 * dt; w.pos.y += w.vy * dt;
+    const s = 0.5 + 2 * Math.min(w.alter, 0.5);
+    rauch.setMatrixAt(i, wMatrix.makeScale(s, s, s).setPosition(w.pos));
+  }
+  rauch.instanceMatrix.needsUpdate = true;
+}
+function spurenLoeschen() {
+  for (const s of spuren) s.leeren();
+  for (let i = 0; i < P.RAUCH_MAX; i++) { wolken[i].alter = 1; rauch.setMatrixAt(i, nullMatrix); }
+  rauch.instanceMatrix.needsUpdate = true;
+}
+const seiteBild = V();
+
 // ---------- Zustand ----------
 const zustand = { lenk: 0, zeit: 0, laeuft: false, pause: false, kontakte: 0, wandVorher: false, wandPause: 0 };
 function zuruecksetzen() {
@@ -528,13 +619,15 @@ function zuruecksetzen() {
   Object.assign(zustand, { lenk: 0, zeit: 0, laeuft: false, ausrichten: null, fuehrungZeit: 0, fuehrungBahn: null, wandPause: 0, wandVorher: false });
   kamZiel.copy(START_ROT); kamQuat.copy(START_ROT);
   messung.null100 = null; messung.brems = null;
+  for (const rad of RAEDER) { rad.rutschZeit = 0; rad.spurt = false; }
+  spurenLoeschen();                                   // Zurücksetzen löscht alle Spuren und den Rauch
 }
 
 // ---------- Eingabe: Tastatur ----------
 const tasten = new Set();
 const TASTEN = {
   gas: ['KeyW', 'ArrowUp'], bremse: ['KeyS', 'ArrowDown'],
-  links: ['KeyA', 'ArrowLeft'], rechts: ['KeyD', 'ArrowRight'],
+  links: ['KeyA', 'ArrowLeft'], rechts: ['KeyD', 'ArrowRight'], beide: [],
 };
 addEventListener('keydown', e => {
   if (e.repeat) return;
@@ -566,7 +659,7 @@ for (const typ of ['pointerup', 'pointercancel']) document.addEventListener(typ,
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('contextmenu', e => e.preventDefault());
 function gedrueckt(aktion) {
-  for (const a of finger.values()) if (a === aktion) return true;
+  for (const a of finger.values()) if (a === aktion || (a === 'beide' && (aktion === 'gas' || aktion === 'bremse'))) return true;
   return TASTEN[aktion].some(c => tasten.has(c));
 }
 const tipp = (id, fn) => document.getElementById(id).addEventListener('pointerdown', e => { e.preventDefault(); fn(); });
@@ -648,16 +741,24 @@ function maxEinschlag(tempo) {
   tempo = Math.abs(tempo);
   return tempo <= P.LENK_KNICK ? P.LENK_MAX : P.LENK_MAX * Math.pow(P.LENK_KNICK / tempo, P.LENK_EXP);
 }
-// Neues Vorwärts-Tempo nach den gemessenen Formeln (km/h)
-function neuesTempo(v, gas, bremse, dt) {
+// Neues Vorwärts-Tempo nach den gemessenen Formeln (km/h).
+// lenkAnteil: 0 = geradeaus, 1 = voller Lenkeinschlag.
+function neuesTempo(v, gas, bremse, lenkAnteil, dt) {
+  const f = lenkAnteil;
   if (gas && !bremse) {
     // rückwärts rollend: erst abbremsen – darf dabei über 0 hinaus wieder vorwärts gehen
     // (sonst bleibt man an Steigungen hängen: Hang zieht zurück, Bremse stoppt bei 0, immer wieder)
     if (v < 0) return Math.min(v + P.BREMSE * dt, P.ANTRIEB * dt);
-    return v + (P.ANTRIEB - P.WIDERSTAND * v) * dt;
+    return v + (P.ANTRIEB * (1 - (1 - P.ANTRIEB_LENKEN) * f) - P.WIDERSTAND * v) * dt;
   }
   if (bremse) {
-    if (v > 0) return Math.max(v - P.BREMSE * dt, -P.RUECK_ANTRIEB * dt); // bremsen (danach rückwärts)
+    if (v > 0) {
+      // Verzögerung (km/h pro s): geradeaus voll, beim Lenken viel schwächer (dafür dreht das Auto enger)
+      const gerade = gas ? P.BREMSE * P.BREMSE_MIT_GAS : P.BREMSE;
+      const gelenkt = (gas ? P.GAS_BREMSE_LENKEN * v : P.BREMSE_LENKEN) + P.WIDERSTAND * v;
+      const a = gerade + (gelenkt - gerade) * f;
+      return Math.max(v - a * dt, -P.RUECK_ANTRIEB * dt); // bremsen (danach rückwärts)
+    }
     return v - P.RUECK_ANTRIEB * (1 - (v / P.RUECK_MAX) ** 2) * dt; // rückwärts fahren
   }
   v -= P.WIDERSTAND * v * dt;                                     // rollen
@@ -683,7 +784,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   linVorher.copy(lin);   // Geschwindigkeit, bevor die Federn drücken
   const maxL = P.FEDER_LAENGE + P.RAD_RADIUS;
   for (const rad of RAEDER) {
-    punkt.copy(rad.lokal).applyQuaternion(quat).add(pos);
+    punkt.copy(rad.strahl).applyQuaternion(quat).add(pos);
     const strahl = new RAPIER.Ray(punkt, { x: -oben.x, y: -oben.y, z: -oben.z });
     const treffer = welt.castRayAndGetNormal(strahl, maxL, false, undefined, undefined, undefined, autoKoerper);
     rad.abstand = maxL; rad.kontakt = false;
@@ -694,6 +795,9 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     const einfederung = Math.min(maxL - d, P.FEDER_LAENGE);
     if (einfederung <= 0) continue;
     rad.abstand = d; rad.kontakt = true; kontakte++;
+    // Aufsetzpunkt unter dem (gezeichneten) Rad – dort entstehen Bremsspuren
+    rad.boden.copy(rad.lokal).applyQuaternion(quat).add(pos).addScaledVector(oben, -d);
+    rad.bodenN.set(treffer.normal.x, treffer.normal.y, treffer.normal.z);
     normale.x += treffer.normal.x; normale.y += treffer.normal.y; normale.z += treffer.normal.z;
     const h = treffer.collider ? treffer.collider.handle : treffer.colliderHandle;
     if (fuehrungNach.has(h)) fuehrung = fuehrungNach.get(h);
@@ -726,15 +830,40 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
       const grenze = Math.max(linVorher.dot(normale), P.BODENHAFTUNG);
       if (weg > grenze) lin.addScaledVector(normale, grenze - weg);
     }
-    const vfNeu = neuesTempo(vf, gas, bremse, dt);
+    const lenkAnteil = Math.min(1, Math.abs(zustand.lenk) / maxEinschlag(vf));
+    const vfNeu = neuesTempo(vf, gas, bremse, lenkAnteil, dt);
     lin.addScaledVector(vorn, (vfNeu - vf) / 3.6 * g);
+    // Seitlicher Grip: das Rutschen zur Seite wird abgebaut – dabei bleibt das Tempo erhalten
+    // (Kurvenfahren selbst kostet kein Tempo; die Verluste kommen aus den gemessenen Formeln oben)
+    const flachVor = Math.sqrt(Math.max(0, lin.lengthSq() - lin.dot(oben) ** 2));
     const vs = lin.dot(seite);
     lin.addScaledVector(seite, -vs * (1 - Math.exp(-P.GRIP * dt)) * g);
-    const dMax = P.DREH_MAX * Math.PI / 180;
+    const hoch = lin.dot(oben), flachNach = Math.sqrt(Math.max(0, lin.lengthSq() - hoch * hoch));
+    if (flachNach > 0.01) lin.addScaledVector(oben, -hoch).multiplyScalar(flachVor / flachNach).addScaledVector(oben, hoch);
+    // Drehrate: langsam wie ein echtes Auto (Radstand), schneller begrenzt durch die gemessene Kurve
+    // 65 × (100/Tempo)^0,6 °/s. Bremsen beim Lenken lässt das Auto enger einlenken („Drift“).
+    const vb = Math.abs(vf);
+    const kinematisch = (vb / 3.6) * Math.tan(Math.abs(zustand.lenk)) / P.RADSTAND;
+    const grenze = Math.min(P.DREH_MAX, P.DREH_100 * Math.pow(100 / Math.max(vb, 1), P.DREH_EXP)) * Math.PI / 180;
+    let faktor = 1;
+    if (vf > 5) {
+      if (bremse && gas) faktor = P.DREH_GAS_BREMSE;
+      else if (bremse) faktor = P.DREH_BREMSE_138 + (P.DREH_BREMSE_218 - P.DREH_BREMSE_138) * Math.max(0, Math.min(1, (vb - 138) / 80));
+      else if (!gas) faktor = P.DREH_NUR_LENKEN;
+    }
     // In der Steilkurve drückt die Neigung das Auto in die Kurve: es kann dort enger und schneller lenken
     const fb = fuehrung || (zustand.fuehrungZeit > 0 ? zustand.fuehrungBahn : null);
     const kurvenGrip = fb && fb.art === 'kleben' ? P.STEILKURVE_GRIP : 1;
-    let zielDreh = Math.max(-dMax * kurvenGrip, Math.min(dMax * kurvenGrip, kurvenGrip * (vf / 3.6) * Math.tan(zustand.lenk) / P.RADSTAND));
+    let zielDreh = Math.sign(zustand.lenk) * Math.sign(vf) * Math.min(kinematisch, grenze * lenkAnteil) * faktor * kurvenGrip;
+    // Griffigkeit der Räder (1 = voller Grip, 0 = rutscht) – nur für Bremsspuren, Rauch (und später Quietschen)
+    let gripVorn = 1, gripHinten = 1;
+    if (vf > 5) {
+      const lenkt = lenkAnteil > 0.3;
+      if (bremse && lenkt) gripVorn = gripHinten = gas ? 0.3 : 0.2;   // Drift: alle 4 Räder
+      else if (bremse) { gripVorn = 0.8; gripHinten = 0.2; }          // geradeaus bremsen: hinten
+      else if (lenkt) gripVorn = gas ? 0.55 : 0.6;                     // Lenken: vorne leicht
+    }
+    for (const rad of RAEDER) rad.grip = rad.vorn ? gripVorn : gripHinten;
     // An der Wand fast stehend: Lenken dreht das Auto trotzdem, damit man sich ohne Rückwärtsgang befreien kann
     const lenkRichtung = (links ? 1 : 0) - (rechts ? 1 : 0);
     if (zustand.wandVorher && Math.abs(vf) < 20 && lenkRichtung) zielDreh = lenkRichtung * P.WAND_DREHEN;
@@ -865,6 +994,14 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   }
   if (p2.y < -50) zuruecksetzen();
 
+  // Bremsspur-Bedingung je Rad (wie im Original): Bodenkontakt und Grip unter einer Schwelle,
+  // die mit dem Tempo steigt – Schwelle = 0,5 × (min(1, Tempo / 96 km/h))³. Erst nach 0,075 s Rutschen.
+  const schwelle = 0.5 * Math.pow(Math.min(1, Math.abs(vf) / P.SPUR_TEMPO), 3);
+  for (const rad of RAEDER) {
+    if (kontakte > 0 && rad.kontakt && rad.grip < schwelle) rad.rutschZeit += dt; else rad.rutschZeit = 0;
+    rad.spurt = rad.rutschZeit >= P.SPUR_VERZOEGERUNG;
+  }
+
   if (zustand.laeuft) zustand.zeit += dt;
   messen(dt, gas, bremse, links || rechts, vf);
 }
@@ -962,13 +1099,16 @@ function bild(jetzt) {
   const lv = autoKoerper.linvel();
   quat.set(r.x, r.y, r.z, r.w); vorn.set(0, 0, 1).applyQuaternion(quat);
   const vf = lv.x * vorn.x + lv.y * vorn.y + lv.z * vorn.z;
+  // Räder drehen passend zum Tempo (blockieren nie) – nur in der Luft bleiben sie beim Bremsen stehen
+  const radStopp = bremse && zustand.kontakte === 0;
   for (const rad of RAEDER) {
     rad.halter.position.y = -(rad.abstand - P.RAD_RADIUS);
     if (rad.vorn) rad.halter.rotation.y = zustand.lenk;
-    if (!zustand.pause) rad.rad.rotation.x += vf / P.RAD_RADIUS * dt;
+    if (!zustand.pause && !radStopp) rad.rad.rotation.x += vf / P.RAD_RADIUS * dt;
   }
   const bremsLicht = bremse && vf > 0.1;
   for (const l of ruecklichter) l.material = bremsLicht ? lichtAn : lichtAus;
+  if (!zustand.pause) { seiteBild.set(1, 0, 0).applyQuaternion(quat); spurenUndRauch(dt); }
 
   sonne.position.set(t.x + 30, t.y + 60, t.z - 20);
   sonne.target.position.set(t.x, t.y, t.z);
