@@ -108,13 +108,40 @@
     background: rgba(10, 20, 40, 0.88); color: #fff; font-size: 48px; font-weight: 800;
   }
   #pausiert small { font-size: 20px; font-weight: 400; }
-  #streckenwahl { margin-top: 24px; text-align: center; }
-  #streckenwahl .titel { font-size: 16px; font-weight: 400; opacity: 0.8; margin-bottom: 10px; letter-spacing: 0.06em; }
-  #streckenKnoepfe { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; max-width: 720px; }
-  .streckeKnopf { min-width: 120px; padding: 10px 12px; border-radius: 12px; font-size: 16px; font-weight: 600;
-    background: rgba(255,255,255,0.12); border: 2px solid rgba(255,255,255,0.35); color: #fff; cursor: pointer; }
-  .streckeKnopf.aktiv { border-color: #ff8a1f; background: rgba(255,138,31,0.3); }
-  .streckeKnopf small { display: block; font-size: 12px; font-weight: 400; opacity: 0.8; }
+  /* Große Knöpfe (Pause, Ziel) */
+  .reihe { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 18px; pointer-events: auto; }
+  .gknopf { min-width: 150px; padding: 14px 20px; border-radius: 14px; font: inherit; font-size: 20px; font-weight: 700;
+    background: rgba(255,255,255,0.14); border: 2px solid rgba(255,255,255,0.4); color: #fff; cursor: pointer; }
+  .gknopf.haupt { background: #ff8a1f; border-color: #ffb35e; }
+  .gknopf:active { transform: scale(0.96); }
+
+  /* Hauptmenü mit Streckenauswahl (Schritt 6) */
+  #menu {
+    position: fixed; inset: 0; z-index: 7; display: none; flex-direction: column; overflow-y: auto;
+    touch-action: pan-y; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+    background: linear-gradient(160deg, #13264a 0%, #1d3d6e 60%, #2a5590 100%); color: #fff;
+    padding: var(--rand-o) var(--rand-r) var(--rand-u) var(--rand-l);
+  }
+  #menuKopf { display: flex; align-items: center; gap: 16px; margin: 6px 4px 14px; }
+  #menuKopf h1 { margin: 0; font-size: 40px; font-weight: 900; letter-spacing: 0.02em; font-style: italic; }
+  #menuKopf h1 span { color: #ff8a1f; }
+  #menuKopf .info { flex: 1; font-size: 15px; opacity: 0.8; }
+  #menuZu { display: none; }
+  .gruppe { font-size: 15px; letter-spacing: 0.1em; opacity: 0.75; margin: 14px 4px 8px; text-transform: uppercase; }
+  .kacheln { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  .kachel { position: relative; display: flex; flex-direction: column; text-align: left; padding: 0; overflow: hidden;
+    border-radius: 16px; border: 2px solid rgba(255,255,255,0.18); background: rgba(8,18,40,0.55); color: #fff;
+    font: inherit; cursor: pointer; }
+  .kachel.aktiv { border-color: #ff8a1f; }
+  .kachel:active { transform: scale(0.97); }
+  .kachel canvas { width: 100%; aspect-ratio: 16 / 10; display: block; background: #23416b; }
+  .kachel .text { padding: 8px 12px 10px; }
+  .kachel .name { font-size: 18px; font-weight: 800; }
+  .kachel .name b { color: #ff8a1f; margin-right: 6px; }
+  .kachel .zeit { font-size: 14px; opacity: 0.85; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .kachel .zeit.gefahren { color: #7dffa0; opacity: 1; }
+  .kachel .marken { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; }
+  .kachel .marken span { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: rgba(0,0,0,0.55); }
   #laden {
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: #13264a; color: #fff; font-size: 28px; font-weight: 700; z-index: 8;
@@ -153,7 +180,26 @@
   <div class="band" id="zielName">Teile-Parcours</div>
   <div class="band gross" id="zielZeit">00:00.000</div>
   <div id="zielDiff"></div>
-  <div id="zielInfo">Tippe ↺ für einen neuen Versuch</div>
+  <div class="reihe">
+    <button class="gknopf" id="zielNochmal">↺ Nochmal</button>
+    <button class="gknopf haupt" id="zielWeiter">Nächste Strecke ▶</button>
+    <button class="gknopf" id="zielMenu">☰ Menü</button>
+  </div>
+</div>
+
+<!-- Hauptmenü: Streckenauswahl -->
+<div id="menu">
+  <div id="menuKopf">
+    <h1>Blitz<span>bahn</span></h1>
+    <div class="info">Strecke antippen zum Losfahren.</div>
+    <button class="gknopf" id="menuZu">✕ Zurück</button>
+  </div>
+  <div class="gruppe">Strecken 1–10</div>
+  <div class="kacheln" id="kacheln1"></div>
+  <div class="gruppe">Strecken 11–20 · schneller, breiter, neue Elemente</div>
+  <div class="kacheln" id="kacheln2"></div>
+  <div class="gruppe">Übung</div>
+  <div class="kacheln" id="kacheln0"></div>
 </div>
 
 <div id="mess">
@@ -175,8 +221,12 @@
 <div id="hinweis"><div id="hinweisName" style="font-size:24px;font-weight:800;color:#ffc35a"></div><div id="hinweisTipp" style="margin-bottom:6px"></div>Fahr durch alle <b style="color:#22c3d6">türkisen Tore</b> und dann ins Ziel – die Uhr startet mit dem ersten Gas.<br>
   <small>▲ Gas · ▼ Bremse/Rückwärts · ◀ ▶ Lenken · ▼ beim Lenken = Drift · Kante zwischen ▲ und ▼ = Gas + Bremse<br>
   ↺ 1× = zurück zum letzten Tor · ↺ 2× schnell = Neustart<br>Am PC: W A S D / Pfeiltasten, R = letztes Tor, T = Neustart</small></div>
-<div id="pausiert">Pause<small>Irgendwo tippen zum Weiterfahren</small>
-  <div id="streckenwahl"><div class="titel">Strecke wählen</div><div id="streckenKnoepfe"></div></div>
+<div id="pausiert">Pause<small id="pauseName"></small>
+  <div class="reihe">
+    <button class="gknopf haupt" id="pauseWeiter">▶ Weiter</button>
+    <button class="gknopf" id="pauseNeu">↺ Neustart</button>
+    <button class="gknopf" id="pauseMenu">☰ Menü</button>
+  </div>
 </div>
 <div id="laden">Lädt …</div>
 <div id="quer">Bitte das iPad quer halten 🔄</div>
@@ -244,8 +294,12 @@ const P = {
   WAND_DRUEBER: 0.3,      // steil über eine Leitplanke fahren: Tempo × 0,3
   KANTE_WINKEL: 25,       // ° – flacher angefahren lenkt die Leitplanke zurück auf die Bahn
   KANTE_ABPRALL: 0.85,    // … und das kostet nur wenig Tempo (× 0,85)
+  // Neue Streckenelemente (eigene Erfindung, nicht aus der Spezifikation)
+  BOOST: 300,             // km/h pro Sekunde zusätzlich auf dem orangen Boost-Feld
+  BOOST_MAX: 600,         // km/h – darüber schiebt das Boost-Feld nicht mehr
+  POLSTER_SPRUNG: 16,     // m/s – so schnell wirft das grüne Sprungpolster das Auto nach oben (ca. 6 m hoch)
   // Technik
-  SCHRITT: 1 / 240,       // Physik-Schritt (240 pro Sekunde)
+  SCHRITT: 1 / 240,      // Physik-Schritt (240 pro Sekunde)
   WELT_RAND: 1900,        // m vom Start: dort ist die Welt zu Ende
 };
 const FEDER_K = P.MASSE * P.SCHWERKRAFT / (4 * P.FEDER_RUHE);              // Federhärte je Rad
@@ -347,16 +401,34 @@ const TEILE = {
     return { pfad: s => [sg * RASTER * (1 - Math.cos(Math.PI * s)) / 2, 0, 3 * RASTER * s],
              ende: [sg * RASTER, 0, 3 * RASTER, 0], stuecke: 20 };
   },
-  steigung: (stufen = 1) => ({ pfad: s => [0, STUFE * stufen * (1 - Math.cos(Math.PI * s)) / 2, 2 * RASTER * s],
-                               ende: [0, STUFE * stufen, 2 * RASTER, 0], stuecke: 16 }),
-  gefaelle: (stufen = 1) => ({ pfad: s => [0, -STUFE * stufen * (1 - Math.cos(Math.PI * s)) / 2, 2 * RASTER * s],
-                               ende: [0, -STUFE * stufen, 2 * RASTER, 0], stuecke: 16 }),
-  rampe: (hoehe = 3) => ({ pfad: s => [0, hoehe * s, RASTER * s], ende: [0, 0, RASTER, 0], stuecke: 2,
-                           waende: false, fuellen: true }),
+  // Steigung/Gefälle: stufen × 5 m Höhe über felder × 20 m Länge, mit sanftem Anfang und Ende
+  steigung: (stufen = 1, felder = 2) => ({ pfad: s => [0, STUFE * stufen * (1 - Math.cos(Math.PI * s)) / 2, RASTER * felder * s],
+                               ende: [0, STUFE * stufen, RASTER * felder, 0], stuecke: 8 * felder }),
+  gefaelle: (stufen = 1, felder = 2) => ({ pfad: s => [0, -STUFE * stufen * (1 - Math.cos(Math.PI * s)) / 2, RASTER * felder * s],
+                               ende: [0, -STUFE * stufen, RASTER * felder, 0], stuecke: 8 * felder }),
+  rampe: (hoehe = 3, felder = 1) => ({ pfad: s => [0, hoehe * s, RASTER * felder * s], ende: [0, 0, RASTER * felder, 0],
+                           stuecke: 2, waende: false, fuellen: true }),
+  schanze: (hoehe = 6) => TEILE.rampe(hoehe, 2),             // große Sprungschanze (40 m lang)
   // nichts – zum Drüberspringen; stufen < 0: die Landung liegt tiefer
   luecke: (n = 1, stufen = 0) => ({ ende: [0, STUFE * stufen, RASTER * n, 0] }),
-  looping: (richtung = 'links', radius = 12) => {           // Ausfahrt 14 m seitlich versetzt
-    const sg = seiteVon(richtung), versatz = 14;
+  // ---- Neue Elemente ----
+  boost:   (n = 1) => ({ ...TEILE.gerade(n), boost: true, stuecke: 8 * n }), // Boost-Feld: schiebt kräftig an
+  polster: () => ({ ...TEILE.gerade(1), polster: true, stuecke: 8 }),        // Sprungpolster: wirft das Auto hoch
+  tunnel:  (n = 1) => ({ ...TEILE.gerade(n), wand: 'hoch', dach: true }), // Röhre mit hohen Wänden und Dach
+  // Wellenbahn: anzahl Buckel von je hoehe Metern auf n Feldern – weich rauf und runter
+  wellen: (n = 3, hoehe = 1.5, anzahl = Math.max(1, Math.round(n / 2))) => ({   // anzahl muss ganz sein
+    pfad: s => [0, hoehe * (1 - Math.cos(2 * Math.PI * anzahl * s)) / 2, RASTER * n * s],
+    ende: [0, 0, RASTER * n, 0], stuecke: 16 * n }),
+  // Spirale: Kurve, die dabei stufen × 5 m ansteigt (viertel=4: volle Runde, Ausfahrt über der Einfahrt)
+  spirale: (richtung, felder = 2, stufen = 2, viertel = 4) => {
+    const r = RASTER * felder, sg = seiteVon(richtung), A = viertel * Math.PI / 2, H = STUFE * stufen;
+    return {
+      pfad: s => { const a = s * A; return [sg * (r - r * Math.cos(a)), H * (1 - Math.cos(Math.PI * s)) / 2, r * Math.sin(a)]; },
+      ende: [sg * (r - r * Math.cos(A)), H, r * Math.sin(A), sg * A], stuecke: Math.ceil(24 * felder * viertel),
+    };
+  },
+  looping: (richtung = 'links', radius = 12, versatz = 14) => {   // Ausfahrt seitlich versetzt (breite Bahn: mehr Versatz)
+    const sg = seiteVon(richtung);
     return {
       pfad: s => { const a = 2 * Math.PI * s;
         return [sg * versatz * (s - Math.sin(a) / (2 * Math.PI)), radius * (1 - Math.cos(a)), radius * Math.sin(a) + RASTER * s]; },
@@ -371,7 +443,31 @@ const F = {
   strasse: new THREE.Color(0x7d858f), rot: new THREE.Color(0xd8432e), weiss: new THREE.Color(0xf2f2f2),
   seite: new THREE.Color(0x59606a), wand: new THREE.Color(0xe8e2d6), wandOben: new THREE.Color(0x2e4a80),
   schwarz: new THREE.Color(0x1d1d1d), start: new THREE.Color(0x3cba54), kontrollpunkt: new THREE.Color(0x22c3d6),
+  boost: new THREE.Color(0xff8a1f), boostDunkel: new THREE.Color(0x8a4a10), polster: new THREE.Color(0x4fe04f),
+  polsterDunkel: new THREE.Color(0x1f7a2a), hochwand: new THREE.Color(0xc9c1b2), dach: new THREE.Color(0x4a5260),
+  block: new THREE.Color(0xd9b98a), blockDunkel: new THREE.Color(0xc4a170), linie: new THREE.Color(0xf4f4f4),
+  dachUnten: new THREE.Color(0x2c323c), lampe: new THREE.Color(0xfff1b0),
 };
+// Optionen für einzelne Teile oder ganze Strecken (letzter Wert eines Teils, z. B. ['kurveLang', 'rechts', { breite: 24 }]):
+//   breite: Fahrbahnbreite in m (12 normal, 24 = zwei Spuren, 36 = drei Spuren)
+//   wand:   'hoch' = echte Wände (3 m, nicht überfahrbar), 'keine' = ohne Leitplanken
+//   block:  true = Teil steht auf einem massiven Block bis zum Boden (statt auf Stützen)
+// Eine Strecke kann Vorgaben für alle Teile haben: { standard: { breite: 24 }, hoehe: 40 } (hoehe = Starthöhe in m)
+function teilBauen([name, ...werte], std = {}) {
+  const opt = werte.length && typeof werte[werte.length - 1] === 'object' ? werte.pop() : {};
+  const t = TEILE[name](...werte); t.name = name;
+  if (!t.fuehrung) {                              // Loopings bleiben immer einspurig
+    if (std.breite && !t.breite) t.breite = std.breite;
+    if (std.wand && t.waende !== false && !t.wand) t.wand = std.wand;
+    if (std.block) t.block = true;
+  }
+  Object.assign(t, opt);
+  if (t.wand === 'keine') t.waende = false;
+  return t;
+}
+const WAND_HOCH = 3;     // m – „echte“ Wände: nicht überfahrbar
+const DACH_HOEHE = 6.5;  // m – Tunneldach über der Fahrbahn
+const boostCollider = new Set(), polsterCollider = new Set();
 const rotY = (v, yaw) => { const c = Math.cos(yaw), s = Math.sin(yaw); return V(v[0] * c + v[2] * s, v[1], -v[0] * s + v[2] * c); };
 
 // Sammelt Dreiecke für Bild und Kollision
@@ -419,43 +515,66 @@ function baueTeil(t, start, yaw) {
       n.multiplyScalar(Math.cos(b)).addScaledVector(r, Math.sin(b)).normalize();
       r = V().crossVectors(n, tan).normalize();
     }
-    pkt.push({ p, n, r, tan, teil: t.name });
+    pkt.push({ p, n, r, tan, teil: t.name, breite: 2 * w, block: !!t.block });
   }
   bahnPunkte.push(...pkt);
-  // 2) Fahrbahn: rot-weißer Rand, graue Mitte, darunter Dicke bzw. bis zum Boden gefüllt (Rampe)
-  const strasse = new Netz(), wand = new Netz();
+  // 2) Fahrbahn: rot-weißer Rand, graue Mitte, darunter Dicke bzw. bis zum Boden gefüllt (Rampe, Block)
+  const strasse = new Netz(), wand = new Netz(), dach = new Netz(), deko = new Netz();
   const versatz = [-w, -w + RAND, w - RAND, w];
   const oberseite = q => versatz.map(o => q.p.clone().addScaledVector(q.r, o));
   const unterseite = q => [-w, w].map(o => {
     const v = q.p.clone().addScaledVector(q.r, o);
-    if (t.fuellen) v.y = start.y - DICKE; else v.addScaledVector(q.n, -DICKE);
+    if (t.block) v.y = 0; else if (t.fuellen) v.y = start.y - DICKE; else v.addScaledVector(q.n, -DICKE);
     return v;
   });
+  // Wandhöhe: Leitplanke (überfahrbar), echte Wand oder Tunnel (Wände bis unters Dach)
+  const wandH = t.dach ? DACH_HOEHE : t.wand === 'hoch' ? WAND_HOCH : WAND_H;
+  const spuren = Math.max(1, Math.round(2 * w / 12));     // breite Fahrbahn: gestrichelte Spurlinien
   for (let i = 0; i < N; i++) {
     const A = oberseite(pkt[i]), B = oberseite(pkt[i + 1]);
     const rand = i % 2 ? F.rot : F.weiss;
+    const mitte = t.boost ? (i % 2 ? F.boost : F.boostDunkel) : t.polster ? (i % 2 ? F.polster : F.polsterDunkel) : F.strasse;
     strasse.viereck(A[0], A[1], B[1], B[0], rand);
-    strasse.viereck(A[1], A[2], B[2], B[1], F.strasse);
+    strasse.viereck(A[1], A[2], B[2], B[1], mitte);
     strasse.viereck(A[2], A[3], B[3], B[2], rand);
+    if (spuren > 1 && !t.boost && !t.polster && i % 2 === 0) for (let k = 1; k < spuren; k++) {
+      const o = -w + 2 * w * k / spuren;
+      const e = (q, d) => q.p.clone().addScaledVector(q.r, o + d).addScaledVector(q.n, 0.03);
+      deko.viereck(e(pkt[i], -0.15), e(pkt[i + 1], -0.15), e(pkt[i + 1], 0.15), e(pkt[i], 0.15), F.linie);
+    }
     const U = unterseite(pkt[i]), W = unterseite(pkt[i + 1]);
-    strasse.viereck(A[0], B[0], W[0], U[0], F.seite);
-    strasse.viereck(A[3], B[3], W[1], U[1], F.seite);
+    const seitenFarbe = t.block ? (i % 2 ? F.block : F.blockDunkel) : F.seite;
+    strasse.viereck(A[0], B[0], W[0], U[0], seitenFarbe);
+    strasse.viereck(A[3], B[3], W[1], U[1], seitenFarbe);
     strasse.viereck(U[0], U[1], W[1], W[0], F.seite);
-    // 3) Leitplanken links und rechts
+    // 3) Leitplanken bzw. Wände links und rechts
     if (t.waende !== false) for (const [k, sg] of [[0, -1], [3, 1]]) {
       const ia = A[k], ib = B[k];
       const oa = ia.clone().addScaledVector(pkt[i].r, sg * 0.5), ob = ib.clone().addScaledVector(pkt[i + 1].r, sg * 0.5);
-      const ha = pkt[i].n.clone().multiplyScalar(WAND_H), hb = pkt[i + 1].n.clone().multiplyScalar(WAND_H);
-      wand.viereck(ia, ib, ib.clone().add(hb), ia.clone().add(ha), F.wand);
+      const ha = pkt[i].n.clone().multiplyScalar(wandH), hb = pkt[i + 1].n.clone().multiplyScalar(wandH);
+      const innen = wandH > WAND_H ? (i % 2 ? F.hochwand : F.wand) : F.wand;
+      wand.viereck(ia, ib, ib.clone().add(hb), ia.clone().add(ha), innen);
       wand.viereck(ia.clone().add(ha), ib.clone().add(hb), ob.clone().add(hb), oa.clone().add(ha), F.wandOben);
       wand.viereck(oa, ob, ob.clone().add(hb), oa.clone().add(ha), F.wand);
     }
+    // Tunneldach mit Lampenstreifen
+    if (t.dach) {
+      const d = (q, o) => q.p.clone().addScaledVector(q.r, o).addScaledVector(q.n, DACH_HOEHE);
+      dach.viereck(d(pkt[i], -w - 0.5), d(pkt[i + 1], -w - 0.5), d(pkt[i + 1], w + 0.5), d(pkt[i], w + 0.5), F.dach);
+      const l = (q, o) => q.p.clone().addScaledVector(q.r, o).addScaledVector(q.n, DACH_HOEHE - 0.05);
+      if (i % 2 === 0) deko.viereck(l(pkt[i], -0.6), l(pkt[i + 1], -0.6), l(pkt[i + 1], 0.6), l(pkt[i], 0.6), F.lampe);
+    }
   }
   // Stirnseiten (sichtbar z. B. am Rampenende)
-  for (const q of [pkt[0], pkt[N]]) { const A = oberseite(q), U = unterseite(q); strasse.viereck(A[0], A[3], U[1], U[0], F.seite); }
+  for (const q of [pkt[0], pkt[N]]) { const A = oberseite(q), U = unterseite(q); strasse.viereck(A[0], A[3], U[1], U[0], t.block ? F.block : F.seite); }
   const fahrbahn = strasse.fertig(false);
   const wandC = wand.fertig(true);
   if (wandC) wandBahn.set(wandC.handle, pkt);      // damit die Bordstein-Regel weiß, wie die Bahn dort verläuft
+  dach.fertig(false);
+  const dekoC = deko.fertig(false);                  // Linien und Lampen: nur Bild, leuchten selbst
+  if (dekoC) { welt.removeCollider(dekoC, false); deko.mesh.material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }); }
+  if (t.boost) boostCollider.add(fahrbahn.handle);
+  if (t.polster) polsterCollider.add(fahrbahn.handle);
   if (t.kleben) fuehrungNach.set(fahrbahn.handle, { pkt, art: 'kleben' });
   if (t.fuehrung) {
     fuehrungNach.set(fahrbahn.handle, { pkt, art: 'looping' });
@@ -469,7 +588,7 @@ function baueTeil(t, start, yaw) {
     weg += pkt[i].p.distanceTo(pkt[i - 1].p);
     const q = pkt[i];
     const unten = t.fuellen ? start.y - DICKE + OBEN : q.p.y - DICKE;   // gefüllte Rampe: Unterkante
-    if (weg >= 12 && !t.saeulenlos && q.n.y > 0.8 && unten > 1.5) {
+    if (weg >= 12 && !t.saeulenlos && !t.block && q.n.y > 0.8 && unten > 1.5) {
       saeulen.push(V(q.p.x, unten, q.p.z)); weg = 0;
     }
   }
@@ -502,10 +621,10 @@ function baueTeil(t, start, yaw) {
   }
 }
 
-function baueStrecke(liste) {
-  const pos = V(0, 0, 0); let yaw = 0;
-  for (const [name, ...werte] of liste) {
-    const t = TEILE[name](...werte); t.name = name;
+function baueStrecke(strecke) {
+  const pos = V(0, strecke.hoehe || 0, 0); let yaw = 0;
+  for (const eintrag of strecke.teile) {
+    const t = teilBauen(eintrag, strecke.standard);
     baueTeil(t, pos, yaw);
     const [x, y, z, dreh] = t.ende;
     pos.add(rotY([x, y, z], yaw)); yaw += dreh;
@@ -513,7 +632,7 @@ function baueStrecke(liste) {
   // Brücken: keine Stütze darf auf einer tiefer liegenden Fahrbahn stehen
   for (let i = saeulen.length - 1; i >= 0; i--) {
     const s = saeulen[i];
-    const blockiert = bahnPunkte.some(b => b.p.y < s.y - 4 && Math.hypot(b.p.x - s.x, b.p.z - s.z) < BREIT / 2 + 3);
+    const blockiert = bahnPunkte.some(b => b.p.y < s.y - 4 && Math.hypot(b.p.x - s.x, b.p.z - s.z) < b.breite / 2 + 3);
     if (blockiert) saeulen.splice(i, 1);
   }
   // Stützen als ein gemeinsames Modell (schnell) + Kollision
@@ -527,15 +646,16 @@ function baueStrecke(liste) {
 }
 
 // Planer: rechnet nur die Mittellinie einer Strecke aus (ohne zu bauen) – zum Prüfen auf Überschneidungen
-function streckenPlan(liste) {
-  const punkte = [], pos = V(0, 0, 0); let yaw = 0;
-  liste.forEach(([name, ...werte], teilNr) => {
-    const t = TEILE[name](...werte);
+function streckenPlan(strecke) {
+  const punkte = [], pos = V(0, strecke.hoehe || 0, 0); let yaw = 0;
+  strecke.teile.forEach((eintrag, teilNr) => {
+    const t = teilBauen(eintrag, strecke.standard), name = t.name;
     if (t.pfad) {
       const n = Math.max(2, Math.ceil(t.stuecke / 2));
       for (let i = 0; i <= n; i++) {
         const p = rotY(t.pfad(i / n), yaw).add(pos);
-        punkte.push({ p, teilNr, name, breite: t.breite || BREIT, looping: !!t.fuehrung });
+        punkte.push({ p, teilNr, name, breite: t.breite || BREIT, looping: !!t.fuehrung, block: !!t.block, dach: !!t.dach,
+                      gefuellt: !!t.fuellen, start: pos.y });
       }
     }
     const [x, y, z, dreh] = t.ende;
@@ -618,13 +738,84 @@ const STRECKEN = [
             ['steigung', 2], ['hochbahn'], ['rampe', 2], ['luecke', 3, -2], ['gerade', 2], ['kontrollpunkt'], ['kurveLang', 'links'],
             ['sKurve', 'rechts'], ['steigung'], ['gefaelle'], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade', 3], ['kontrollpunkt'],
             ['gerade', 2], ['ziel']] },
+
+  // ---------------- Strecken 11–20: neue Elemente, breiter, schneller ----------------
+  // 11: zweispurig, Boost-Felder, weite Kurven bei über 300 km/h
+  { nr: 11, name: 'Turbo', tipp: 'Orange Felder = Boost! Zwei Spuren breit – vor den weiten Kurven kurz vom Gas.',
+    standard: { breite: 24 },
+    teile: [['start'], ['gerade', 2], ['boost', 2], ['gerade', 8], ['kontrollpunkt'], ['gerade', 2], ['kurveWeit', 'rechts', 8],
+            ['gerade', 4], ['boost', 2], ['gerade', 10], ['kurveWeit', 'rechts', 8], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2],
+            ['steigung', 2, 4], ['gefaelle', 2, 4], ['boost', 1], ['gerade', 6], ['kurveWeit', 'rechts', 6], ['gerade', 6],
+            ['rampe', 2, 2], ['luecke', 5], ['gerade', 6], ['kontrollpunkt'], ['gerade', 4], ['ziel']] },
+  // 12: echte Wände und Tunnel – eng, aber man kann sich an den Wänden entlangschrammen
+  { nr: 12, name: 'Tunnelblick', tipp: 'Hohe Wände überall – hier fällt niemand raus. Aber jede Berührung kostet Tempo.',
+    standard: { wand: 'hoch' },
+    teile: [['start'], ['gerade', 2], ['tunnel', 3], ['kurveKurz', 'links'], ['gerade'], ['kurveKurz', 'rechts', { dach: true }], ['tunnel', 2],
+            ['kontrollpunkt'], ['sKurve', 'links'], ['sKurve', 'rechts'], ['kurveLang', 'rechts'], ['tunnel', 4], ['kurveLang', 'rechts', { dach: true }],
+            ['gerade'], ['wellen', 3, 1.2], ['kontrollpunkt'], ['kurveKurz', 'links'], ['gerade'], ['kurveKurz', 'links'], ['tunnel', 3],
+            ['kurveLang', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 13: Wellen und Sprungpolster
+  { nr: 13, name: 'Wellenreiter', tipp: 'Grüne Felder werfen dich hoch – mit genug Schwung (über 130 km/h) erreichst du die nächste Bahn.',
+    teile: [['start'], ['gerade', 2], ['wellen', 4, 1.5], ['kontrollpunkt'], ['kurveLang', 'rechts'], ['gerade'], ['polster'], ['luecke', 1],
+            ['gerade', 3], ['kurveLang', 'rechts'], ['wellen', 6, 2.5, 4], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade'], ['polster'],
+            ['luecke', 1, 1], ['hochbahn', 3], ['polster', { waende: false }], ['luecke', 2, -1], ['gerade', 3], ['kurveLang', 'links'],
+            ['wellen', 3, 1.5], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 14: dreispurige Autobahn – lange Geraden, Boost, über 450 km/h
+  { nr: 14, name: 'Autobahn', tipp: 'Drei Spuren, Boost, Vollgas: über 450 km/h. Vor den Kurven rechtzeitig bremsen!',
+    standard: { breite: 36 },
+    teile: [['start'], ['gerade', 3], ['boost', 3], ['gerade', 15], ['kontrollpunkt'], ['gerade', 3], ['kurveWeit', 'links', 8], ['gerade', 5],
+            ['steigung', 2, 6], ['boost', 2], ['gefaelle', 2, 6], ['gerade', 6], ['kontrollpunkt'], ['gerade', 2], ['kurveWeit', 'links', 8],
+            ['gerade', 10], ['boost', 2], ['gerade', 10], ['kurveWeit', 'links', 8], ['gerade', 6], ['kontrollpunkt'], ['gerade', 4], ['ziel']] },
+  // 15: von Block zu Block springen
+  { nr: 15, name: 'Trampolin', tipp: 'Von Polster zu Polster auf die Blöcke hinauf – nicht zu langsam, sonst knallst du gegen die Wand.',
+    teile: [['start'], ['gerade', 2], ['polster'], ['luecke', 1, 1], ['gerade', 2, { block: true }], ['polster', { block: true }],
+            ['luecke', 1, 1], ['gerade', 2, { block: true }], ['kontrollpunkt', { block: true }], ['kurveLang', 'rechts', { block: true }],
+            ['gerade', 2, { block: true }], ['polster', { block: true }], ['luecke', 2, -2], ['gerade', 3], ['kurveLang', 'rechts'], ['gerade', 2],
+            ['polster'], ['luecke', 1], ['gerade', 2], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade'], ['polster'], ['luecke', 1, 1],
+            ['hochbahn', 2], ['gefaelle', 1], ['gerade'], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 16: Start oben auf einem Turm, lange Abfahrt, Spirale wieder hinauf
+  { nr: 16, name: 'Gipfelsturm', tipp: 'Start 40 m hoch: runter mit Vollgas, dann die Spirale wieder hinauf und ein Sprung zum Schluss.',
+    hoehe: 40, standard: { breite: 24 },
+    teile: [['start', { block: true }], ['gerade', 2, { block: true }], ['gefaelle', 8, 8, { block: true }], ['boost'], ['gerade', 4], ['kontrollpunkt'],
+            ['kurveWeit', 'rechts', 5], ['gerade', 4], ['spirale', 'links', 3, 4, 4], ['hochbahn', 2], ['kontrollpunkt'],
+            ['kurveLang', 'rechts', { wand: 'hoch' }], ['hochbahn', 3], ['rampe', 2, 2], ['luecke', 3, -2], ['gerade', 4],
+            ['kurveLang', 'rechts'], ['gefaelle', 2, 4], ['gerade', 2], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 17: zwei Spiralen hinauf, eine doppelte hinunter – alles mit hohen Wänden
+  { nr: 17, name: 'Wendeltreppe', tipp: 'Spiralen rauf und runter. Die Wände halten dich – gleichmäßig lenken ist schneller als schrammen.',
+    standard: { wand: 'hoch' },
+    teile: [['start'], ['gerade', 3], ['spirale', 'rechts', 2, 3, 4], ['gerade', 2], ['kontrollpunkt'], ['gerade'], ['kurveLang', 'links'],
+            ['gerade', 2], ['spirale', 'links', 2, 3, 4], ['gerade', 2], ['kontrollpunkt'], ['gerade', 2], ['kurveLang', 'rechts'], ['gerade'],
+            ['spirale', 'rechts', 2, -6, 8], ['gerade', 2], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 18: Straßen auf Blöcken, Sprünge über Schluchten
+  { nr: 18, name: 'Blockland', tipp: 'Alles steht auf Blöcken. Wer in eine Schlucht fällt, muss zurück zum Tor (↺).',
+    hoehe: 15, standard: { block: true, wand: 'hoch' },
+    teile: [['start'], ['gerade', 3], ['kurveLang', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['rampe', 2, 2], ['luecke', 2], ['gerade', 3],
+            ['kurveKurz', 'links'], ['kurveKurz', 'rechts'], ['gefaelle', 1, 2], ['gerade', 2], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade', 2],
+            ['rampe', 2, 2], ['luecke', 2, -1], ['gerade', 3], ['kurveLang', 'links'], ['steigung', 1, 2], ['gerade', 2], ['kontrollpunkt'],
+            ['gerade'], ['ziel']] },
+  // 19: zwei Loopings direkt hintereinander, Boost davor
+  { nr: 19, name: 'Doppel-Looping', tipp: 'Zwei Loopings direkt hintereinander – der Boost davor gibt dir genug Schwung.',
+    teile: [['start'], ['gerade', 2], ['boost'], ['gerade', 2], ['looping', 'links'], ['gerade'], ['looping', 'rechts'], ['gerade', 2],
+            ['kontrollpunkt'], ['kurveLang', 'rechts'], ['gerade', 2], ['polster'], ['luecke', 1], ['gerade', 2], ['kurveLang', 'rechts'],
+            ['boost'], ['gerade'], ['looping', 'rechts'], ['gerade'], ['kontrollpunkt'], ['kurveLang', 'links'], ['gerade', 3],
+            ['kurveLang', 'links'], ['gerade', 2], ['kontrollpunkt'], ['gerade'], ['ziel']] },
+  // 20: alles zusammen
+  { nr: 20, name: 'Großes Finale', tipp: 'Turm, Boost, Tunnel, Polster, Spirale, Looping – die längste Strecke. Viel Glück!',
+    hoehe: 30,
+    teile: [['start', { block: true, breite: 24 }], ['gerade', 2, { block: true, breite: 24 }], ['gefaelle', 6, 6, { block: true, breite: 24 }],
+            ['boost', 2, { breite: 24 }], ['gerade', 6, { breite: 24 }], ['kontrollpunkt', { breite: 24 }], ['kurveWeit', 'rechts', 5, { breite: 24 }],
+            ['gerade', 2], ['tunnel', 4, { wand: 'hoch' }], ['kurveLang', 'rechts', { wand: 'hoch', dach: true }], ['tunnel', 2, { wand: 'hoch' }],
+            ['kontrollpunkt'], ['gerade'], ['polster'], ['luecke', 1, 1], ['hochbahn', 2], ['kurveLang', 'links', { wand: 'hoch' }],
+            ['spirale', 'links', 2, 3, 4, { wand: 'hoch' }], ['hochbahn', 2], ['kontrollpunkt'], ['gefaelle', 4, 4], ['boost'], ['gerade'],
+            ['looping', 'rechts'], ['gerade', 2], ['kontrollpunkt'], ['wellen', 4, 2, 3], ['kurveLang', 'links'], ['gerade', 2], ['rampe', 2, 2],
+            ['luecke', 3], ['gerade', 3], ['kontrollpunkt'], ['gerade', 2], ['ziel']] },
 ];
 const streckenWahl = (() => {
   let nr = 1;
   try { const q = new URLSearchParams(location.search).get('strecke'); if (q !== null) nr = parseInt(q, 10); } catch {}
   return STRECKEN.find(s => s.nr === nr) || STRECKEN.find(s => s.nr === 1) || STRECKEN[0];
 })();
-baueStrecke(streckenWahl.teile);
+baueStrecke(streckenWahl);
 const startMarke = marken.find(m => m.typ === 'start');
 const START = { x: startMarke.pos.x, y: startMarke.pos.y + P.FEDER_LAENGE + P.RAD_RADIUS - P.FEDER_RUHE + 0.01, z: startMarke.pos.z };
 const START_YAW = Math.atan2(startMarke.tan.x, startMarke.tan.z);
@@ -813,19 +1004,118 @@ let bestzeit = bestzeitLaden();
 document.getElementById('hinweisName').textContent = STRECKEN_NAME;
 document.getElementById('hinweisTipp').textContent = streckenWahl.tipp || '';
 
-// Streckenwahl im Pause-Bildschirm (vorläufig – das richtige Menü kommt in Schritt 6)
+// =====================================================================
+//  MENÜ (Schritt 6): Streckenauswahl mit Karte von oben und Bestzeit,
+//  Pause-Menü, „Nächste Strecke“ im Ziel.
+//  Eine Strecke wird beim Laden der Seite gebaut – Wechseln = Seite mit ?strecke=N&los=1 neu laden.
+// =====================================================================
 function streckeLaden(nr) {
-  try { const u = new URL(location.href); u.searchParams.set('strecke', nr); location.href = u.toString(); }
-  catch { location.search = '?strecke=' + nr; }
+  try { const u = new URL(location.href); u.searchParams.set('strecke', nr); u.searchParams.set('los', '1'); location.href = u.toString(); }
+  catch { location.search = '?strecke=' + nr + '&los=1'; }
 }
-for (const s of STRECKEN.filter(s => s.nr > 0).concat(STRECKEN.filter(s => s.nr === 0))) {
-  const b = document.createElement('button');
-  b.className = 'streckeKnopf' + (s === streckenWahl ? ' aktiv' : '');
-  let bz = null; try { const d = JSON.parse(localStorage.getItem('blitzbahn.bestzeit.' + (s.nr ? `${s.nr} · ${s.name}` : s.name))); bz = d && d.zeit; } catch {}
-  b.innerHTML = `${s.nr ? s.nr + ' · ' : ''}${s.name}<small>${bz ? 'Bestzeit ' + zeitText(bz) : 'noch keine Zeit'}</small>`;
-  b.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); streckeLaden(s.nr); });
-  document.getElementById('streckenKnoepfe').appendChild(b);
+const naechsteNr = () => (streckenWahl.nr >= 1 && streckenWahl.nr < 20 ? streckenWahl.nr + 1 : 1);
+const bestzeitVon = s => {
+  try { const d = JSON.parse(localStorage.getItem('blitzbahn.bestzeit.' + (s.nr ? `${s.nr} · ${s.name}` : s.name))); return d && typeof d.zeit === 'number' ? d.zeit : null; }
+  catch { return null; }
+};
+
+// Karte von oben: Mittellinie in Fahrbahnbreite, Farbe nach Höhe (tief = grau, hoch = orange), Tore als Punkte
+function karteZeichnen(canvas, s) {
+  const pr = Math.min(2, window.devicePixelRatio || 1), W = 320, H = 200;
+  canvas.width = W * pr; canvas.height = H * pr;
+  const g = canvas.getContext('2d'); g.scale(pr, pr);
+  const pkt = streckenPlan(s);
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, yMax = 1;
+  for (const q of pkt) { x0 = Math.min(x0, -q.p.x); x1 = Math.max(x1, -q.p.x); z0 = Math.min(z0, q.p.z); z1 = Math.max(z1, q.p.z); yMax = Math.max(yMax, q.p.y); }
+  const rand = 18, m = Math.min((W - 2 * rand) / Math.max(1, x1 - x0), (H - 2 * rand) / Math.max(1, z1 - z0));
+  const sx = x => W / 2 + (x - (x0 + x1) / 2) * m, sy = z => H / 2 - (z - (z0 + z1) / 2) * m;
+  // Stücke von unten nach oben zeichnen, damit Brücken oben liegen
+  const stuecke = [];
+  for (let i = 1; i < pkt.length; i++) {
+    const a = pkt[i - 1], b = pkt[i];
+    if (a.p.distanceTo(b.p) > 25) continue;                       // Lücke (Sprung)
+    stuecke.push({ a, b, y: (a.p.y + b.p.y) / 2 });
+  }
+  stuecke.sort((u, v) => u.y - v.y);
+  g.lineCap = 'round';
+  // Schichten von je 4 m Höhe: erst alle Ränder einer Schicht, dann die Flächen (keine Punkte an den Stoßstellen)
+  const linie = ({ a, b }) => { g.beginPath(); g.moveTo(sx(-a.p.x), sy(a.p.z)); g.lineTo(sx(-b.p.x), sy(b.p.z)); g.stroke(); };
+  for (let i = 0; i < stuecke.length;) {
+    let j = i; while (j < stuecke.length && stuecke[j].y < stuecke[i].y + 4) j++;
+    const schicht = stuecke.slice(i, j); i = j;
+    g.strokeStyle = 'rgba(10,20,40,0.7)';
+    for (const st of schicht) { g.lineWidth = Math.max(2.5, st.b.breite * m) + 3; linie(st); }
+    for (const st of schicht) {
+      const h = Math.min(1, st.y / Math.max(10, yMax));
+      g.strokeStyle = st.b.name === 'boost' ? '#ff8a1f' : st.b.name === 'polster' ? '#4fe04f'
+                    : `rgb(${Math.round(170 + 85 * h)},${Math.round(178 - 40 * h)},${Math.round(190 - 150 * h)})`;
+      g.lineWidth = Math.max(2.5, st.b.breite * m); linie(st);
+    }
+  }
+  // Start, Tore, Ziel
+  const mitteVon = name => {
+    const nrs = [...new Set(pkt.filter(q => q.name === name).map(q => q.teilNr))];
+    return nrs.map(n => { const ps = pkt.filter(q => q.teilNr === n); return ps[Math.floor(ps.length / 2)]; });
+  };
+  const punkt = (q, farbe, r) => { g.fillStyle = farbe; g.strokeStyle = '#0a1428'; g.lineWidth = 2;
+    g.beginPath(); g.arc(sx(-q.p.x), sy(q.p.z), r, 0, 7); g.fill(); g.stroke(); };
+  for (const q of mitteVon('kontrollpunkt')) punkt(q, '#22c3d6', 4.5);
+  for (const q of mitteVon('ziel')) punkt(q, '#ffffff', 6);
+  for (const q of mitteVon('start')) punkt(q, '#3cba54', 6);
 }
+
+function menuBauen() {
+  const merkmale = s => {
+    const namen = new Set(s.teile.map(t => t[0])), m = [];
+    if (namen.has('looping')) m.push('Looping');
+    if (namen.has('boost')) m.push('Boost');
+    if (namen.has('polster')) m.push('Polster');
+    if (namen.has('spirale')) m.push('Spirale');
+    if (namen.has('tunnel')) m.push('Tunnel');
+    if (s.standard && s.standard.breite) m.push(s.standard.breite >= 36 ? '3 Spuren' : '2 Spuren');
+    return m.slice(0, 3);
+  };
+  for (const s of STRECKEN) {
+    const b = document.createElement('button');
+    b.className = 'kachel' + (s === streckenWahl && new URLSearchParams(location.search).get('los') ? ' aktiv' : '');
+    const c = document.createElement('canvas');
+    b.appendChild(c);
+    b.insertAdjacentHTML('beforeend', `<div class="marken">${merkmale(s).map(x => `<span>${x}</span>`).join('')}</div>
+      <div class="text"><div class="name">${s.nr ? `<b>${s.nr}</b>` : ''}${s.name}</div><div class="zeit"></div></div>`);
+    kachelZeiten.push([s, b.querySelector('.zeit')]);
+    b.addEventListener('click', () => streckeLaden(s.nr));
+    document.getElementById(s.nr === 0 ? 'kacheln0' : s.nr <= 10 ? 'kacheln1' : 'kacheln2').appendChild(b);
+    karteZeichnen(c, s);
+  }
+}
+const kachelZeiten = [];
+function menuZeigen(zurueckMoeglich) {
+  for (const [s, el] of kachelZeiten) {            // Bestzeiten frisch eintragen
+    const bz = bestzeitVon(s);
+    el.textContent = bz ? '🏁 ' + zeitText(bz) : 'noch nicht gefahren';
+    el.classList.toggle('gefahren', !!bz);
+  }
+  zustand.pause = true;
+  document.getElementById('pausiert').style.display = 'none';
+  document.getElementById('menuZu').style.display = zurueckMoeglich ? 'block' : 'none';
+  document.getElementById('menu').style.display = 'flex';
+}
+function menuSchliessen() {
+  document.getElementById('menu').style.display = 'none';
+  zustand.pause = false;
+}
+const klick = (id, fn) => document.getElementById(id).addEventListener('click', e => { e.stopPropagation(); fn(); });
+// Knöpfe im Pause-Menü (pointerdown nicht zum Hintergrund durchreichen, der sonst „Weiter“ auslöst)
+for (const id of ['pauseWeiter', 'pauseNeu', 'pauseMenu']) document.getElementById(id).addEventListener('pointerdown', e => e.stopPropagation());
+klick('pauseWeiter', () => pauseUmschalten());
+klick('pauseNeu', () => { pauseUmschalten(); zuruecksetzen(); });
+klick('pauseMenu', () => menuZeigen(true));
+klick('menuZu', () => menuSchliessen());
+klick('zielNochmal', () => zuruecksetzen());
+klick('zielWeiter', () => streckeLaden(naechsteNr()));
+klick('zielMenu', () => menuZeigen(false));
+document.getElementById('pauseName').textContent = STRECKEN_NAME;
+document.getElementById('zielWeiter').textContent = `Nächste: ${naechsteNr()} · ${STRECKEN.find(s => s.nr === naechsteNr()).name} ▶`;
 
 function torFaerben(m, geschafft) {
   if (m.tor) m.tor.material.color.set(geschafft ? 0x7dffa0 : 0xffffff);   // eingesammelt = grünlich
@@ -932,7 +1222,8 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyT' || e.code === 'Backspace') zuruecksetzen();   // T = Neustart
   if (e.code === 'KeyP' || e.code === 'Space') pauseUmschalten();
   if (e.code === 'KeyC') kameraUmschalten();
-  if (zustand.pause && /^Digit\d$/.test(e.code)) { const d = +e.code.slice(5); streckeLaden(d === 0 ? 10 : d); }
+  if (e.code === 'KeyM' || e.code === 'Escape') menuZeigen(true);         // M = Menü
+  if (e.code === 'KeyN' && rennen.fertig) streckeLaden(naechsteNr());      // N = nächste Strecke (im Ziel)
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
 });
 addEventListener('keyup', e => tasten.delete(e.code));
@@ -966,6 +1257,7 @@ tipp('pause', pauseUmschalten);
 tipp('pausiert', pauseUmschalten);
 tipp('kamera', kameraUmschalten);
 function pauseUmschalten() {
+  if (document.getElementById('menu').style.display === 'flex') return;   // im Menü gibt es keine Pause
   zustand.pause = !zustand.pause;
   document.getElementById('pausiert').style.display = zustand.pause ? 'flex' : 'none';
 }
@@ -1076,7 +1368,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
   lin.set(lv.x, lv.y, lv.z); ang.set(av.x, av.y, av.z);
 
   // 1) Vier Federn: Strahl von jedem Aufhängepunkt nach unten
-  let kontakte = 0, radAufWand = false, wandUnterRad = null, maxEinfederung = 0;
+  let kontakte = 0, radAufWand = false, wandUnterRad = null, maxEinfederung = 0, aufBoost = 0, aufPolster = 0;
   normale.set(0, 0, 0);
   fuehrung = null;
   linVorher.copy(lin);   // Geschwindigkeit, bevor die Federn drücken
@@ -1100,6 +1392,8 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     normale.x += treffer.normal.x; normale.y += treffer.normal.y; normale.z += treffer.normal.z;
     const h = treffer.collider ? treffer.collider.handle : treffer.colliderHandle;
     if (fuehrungNach.has(h)) fuehrung = fuehrungNach.get(h);
+    if (boostCollider.has(h)) aufBoost++;
+    if (polsterCollider.has(h)) aufPolster++;
     if (wandNach.has(h)) { radAufWand = true; wandUnterRad = h; }  // Rad fährt gerade auf eine Leitplanke
     hebel.subVectors(punkt, pos);
     vPunkt.crossVectors(ang, hebel).add(lin);
@@ -1145,6 +1439,14 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     const lenkAnteil = Math.min(1, Math.abs(zustand.lenk) / maxEinschlag(vf));
     const vfNeu = neuesTempo(vf, gas, bremse, lenkAnteil, dt);
     lin.addScaledVector(vorn, (vfNeu - vf) / 3.6 * g);
+    // Boost-Feld: schiebt nach vorn (auch ohne Gas), bis BOOST_MAX
+    if (aufBoost >= 2 && vf > -5 && vf < P.BOOST_MAX) lin.addScaledVector(vorn, P.BOOST / 3.6 * dt);
+    // Sprungpolster: wirft das Auto entlang der Fahrbahn-Normale hoch (einmal pro Überfahrt)
+    if (aufPolster >= 2 && !(zustand.polsterPause > 0)) {
+      const nn = normale.clone().normalize(), hoch = lin.dot(nn);
+      lin.addScaledVector(nn, P.POLSTER_SPRUNG - hoch);
+      zustand.polsterPause = 0.4;
+    }
     // Seitlicher Grip: das Rutschen zur Seite wird abgebaut – dabei bleibt das Tempo erhalten
     // (Kurvenfahren selbst kostet kein Tempo; die Verluste kommen aus den gemessenen Formeln oben)
     const flachVor = Math.sqrt(Math.max(0, lin.lengthSq() - lin.dot(oben) ** 2));
@@ -1244,6 +1546,7 @@ function physikSchritt(dt, gas, bremse, links, rechts) {
     }
   }
   zustand.trefferZahl = (zustand.trefferZahl || 0);
+  zustand.polsterPause = Math.max(0, (zustand.polsterPause || 0) - dt);
   zustand.wandPause = Math.max(0, zustand.wandPause - dt);
   // Sonderregeln nur beim Vorwärtsfahren – rückwärts regelt die Physik allein (sonst Endlosschleife an der Wand)
   // (Die Physik meldet Kontakt schon kurz vor dem Aufprall – gezählt wird erst, wenn die Wand wirklich bremst.)
@@ -1440,7 +1743,7 @@ function bild(jetzt) {
 
   sonne.position.set(t.x + 30, t.y + 60, t.z - 20);
   sonne.target.position.set(t.x, t.y, t.z);
-  kameraNachfuehren(dt);
+  if (!zustand.freieKamera) kameraNachfuehren(dt);   // freieKamera: nur zum Testen (Blick von außen)
 
   zeitEl.textContent = zeitText(zustand.zeit);
   kpEl.textContent = `${rennen.naechstesTor}/${tore.length}`;
@@ -1453,6 +1756,8 @@ function bild(jetzt) {
   requestAnimationFrame(bild);
 }
 zuruecksetzen();
+menuBauen();
+if (!new URLSearchParams(location.search).get('los')) menuZeigen(false);   // ohne „los“: zuerst das Menü
 el('laden').style.display = 'none';
 requestAnimationFrame(bild);
 
@@ -1461,7 +1766,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 // Zum Testen am PC (Konsole): Zugriff auf Auto und Werte
-window.spiel = { autoKoerper, zustand, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken, saeulen, welt, RAEDER, wandNach,
+window.spiel = { autoKoerper, zustand, camera, P, zuruecksetzen, schritt: physikSchritt, messung, bahnPunkte, marken, saeulen, welt, RAEDER, wandNach,
                  rennen, tore, zumLetztenTor, resetGetippt, streckenPlan, STRECKEN, streckenWahl, get bestzeit() { return bestzeit; },
                  bestzeitLoeschen() { try { localStorage.removeItem(SPEICHER); } catch {} bestzeit = null; } };
 </script>
